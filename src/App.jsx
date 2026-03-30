@@ -132,12 +132,11 @@ export default function App() {
 const WelcomeView = () => (
   <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-20 shadow-2xl border border-slate-100 text-center max-w-4xl mx-auto animate-in">
     <div className="flex flex-col items-center mb-10">
-      <div className="w-16 h-16 bg-[#1B2B4B] rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-900/20 mb-8">
-        <svg viewBox="0 0 100 100" className="w-10 h-10 fill-none stroke-white">
-          <path d="M20 80 L20 65 M40 80 L40 50 M60 80 L60 40 M80 80 L80 55" strokeWidth="8" strokeLinecap="round" stroke="#1EB1BB"/>
-          <path d="M15 65 C 25 45, 45 20, 85 25 C 75 35, 70 55, 80 75" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </div>
+     <img
+  src="/vayrity-logo.png"
+  alt="Vayrity logo"
+  className="h-16 md:h-20 object-contain mb-8"
+/>
 
       <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-[#1B2B4B] mb-3">
         VAYRITY
@@ -456,18 +455,16 @@ const WelcomeView = () => (
       {step > 0 && (
   <header className="p-5 md:p-8 flex justify-between items-center bg-white/80 backdrop-blur-xl sticky top-0 z-50 border-b border-slate-100">
     <div className="flex items-center justify-between w-full max-w-7xl mx-auto">
-      <div 
-        className="flex items-center gap-3 cursor-pointer active:scale-95 transition-transform"
-        onClick={() => setStep(0)}
-      >
-        <div className="w-10 h-10 bg-[#1B2B4B] rounded-xl flex items-center justify-center shadow-lg shadow-blue-900/10">
-          <svg viewBox="0 0 100 100" className="w-7 h-7 fill-none stroke-white" xmlns="http://www.w3.org/2000/svg">
-            <path d="M20 80 L20 65 M40 80 L40 50 M60 80 L60 40 M80 80 L80 55" strokeWidth="8" strokeLinecap="round" stroke="#1EB1BB"/>
-            <path d="M15 65 C 25 45, 45 20, 85 25" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
-        <span className="font-black tracking-tighter text-[#1B2B4B] text-2xl uppercase">VAYRITY</span>
-      </div>
+     <div
+  className="flex items-center cursor-pointer active:scale-95 transition-transform"
+  onClick={() => setStep(0)}
+>
+  <img
+    src="/vayrity-logo.png"
+    alt="Vayrity logo"
+    className="h-10 md:h-12 w-auto object-contain"
+  />
+</div>
 
       <button 
         onClick={resetApp}
