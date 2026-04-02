@@ -44,6 +44,12 @@ const DEBT_PRESETS = [
   'Buy Now Pay Later',
 ];
 
+// --- Helpers ---
+const isFilled = (value) =>
+  value !== '' && value !== null && value !== undefined;
+
+const isNegative = (value) => isFilled(value) && Number(value) < 0;
+
 // --- Payoff Helpers ---
 const calculateDebtPayoff = (balance, apr, monthlyPayment) => {
   const principal = Number(balance || 0);
@@ -152,6 +158,8 @@ const calculateRequiredMonthlyPayment = (balance, apr, targetMonths) => {
 
 export default function App() {
   const [step, setStep] = useState(0);
+  const [expandedDebtId, setExpandedDebtId] = useState(null);
+  const [expandedBillId, setExpandedBillId] = useState(null);
   const [state, setState] = useState({
     currency: 'GBP',
     income: '',
@@ -188,6 +196,131 @@ export default function App() {
       maximumFractionDigits: 0,
     })}`;
   };
+
+  const getDebtStatus = (debt) => {
+    const hasName = Boolean(debt.name && debt.name.trim());
+    const hasBalance = isFilled(debt.balance);
+    const hasInterest = isFilled(debt.interest);
+    const hasMinPayment = isFilled(debt.minPayment);
+
+    const hasInvalidValues =
+      isNegative(debt.balance) ||
+      isNegative(debt.interest) ||
+      isNegative(debt.minPayment);
+
+    if (hasInvalidValues) {
+      return {
+        label: 'Invalid',
+        text: 'text-red-600',
+        bg: 'bg-red-50',
+        border: 'border-red-100',
+        dot: 'bg-red-500',
+      };
+    }
+
+    const isComplete = hasName && hasBalance && hasInterest && hasMinPayment;
+
+    if (isComplete) {
+      return {
+        label: 'Complete',
+        text: 'text-emerald-600',
+        bg: 'bg-emerald-50',
+        border: 'border-emerald-100',
+        dot: 'bg-emerald-500',
+      };
+    }
+
+    return {
+      label: 'Needs details',
+      text: 'text-amber-600',
+      bg: 'bg-amber-50',
+      border: 'border-amber-100',
+      dot: 'bg-amber-500',
+    };
+  };
+
+  const getBillStatus = (bill) => {
+    const hasName = Boolean(bill.name && bill.name.trim());
+    const hasAmount = isFilled(bill.amount);
+
+    if (isNegative(bill.amount)) {
+      return {
+        label: 'Invalid',
+        text: 'text-red-600',
+        bg: 'bg-red-50',
+        border: 'border-red-100',
+        dot: 'bg-red-500',
+      };
+    }
+
+    const isComplete = hasName && hasAmount;
+
+    if (isComplete) {
+      return {
+        label: 'Complete',
+        text: 'text-emerald-600',
+        bg: 'bg-emerald-50',
+        border: 'border-emerald-100',
+        dot: 'bg-emerald-500',
+      };
+    }
+
+    return {
+      label: 'Needs details',
+      text: 'text-amber-600',
+      bg: 'bg-amber-50',
+      border: 'border-amber-100',
+      dot: 'bg-amber-500',
+    };
+  };
+
+  const hasInvalidDebts = state.debts.some(
+    (debt) =>
+      isNegative(debt.balance) ||
+      isNegative(debt.interest) ||
+      isNegative(debt.minPayment)
+  );
+
+  const hasInvalidBills = state.bills.some((bill) => isNegative(bill.amount));
+
+  const incomeMissing = step === 2 && !isFilled(state.income);
+  const spendingMissing = step === 2 && !isFilled(state.everydaySpending);
+
+  const stepValidation = useMemo(() => {
+    if (step === 2) {
+      const incomeFilled = isFilled(state.income);
+      const spendingFilled = isFilled(state.everydaySpending);
+
+      if (!incomeFilled || !spendingFilled) {
+        return {
+          canProceed: false,
+          message:
+            'Please fill in both Monthly Income and Everyday Spending before continuing.',
+        };
+      }
+    }
+
+    if (step === 3 && hasInvalidDebts) {
+      return {
+        canProceed: false,
+        message: 'Please fix invalid debt values before continuing.',
+      };
+    }
+
+    if (step === 4 && (hasInvalidDebts || hasInvalidBills)) {
+      return {
+        canProceed: false,
+        message: hasInvalidBills
+          ? 'Please fix invalid bill amounts before getting results.'
+          : 'Please fix invalid debt values before getting results.',
+      };
+    }
+
+    return {
+      canProceed: true,
+      message: '',
+    };
+  }, [step, state.income, state.everydaySpending, hasInvalidDebts, hasInvalidBills]);
 
   const totals = useMemo(() => {
     const income = Number(state.income || 0);
@@ -310,7 +443,11 @@ export default function App() {
     };
   }, [state]);
 
-  const nextStep = () => setStep((s) => Math.min(s + 1, 5));
+  const nextStep = () => {
+    if (!stepValidation.canProceed) return;
+    setStep((s) => Math.min(s + 1, 5));
+  };
+
   const prevStep = () => setStep((s) => Math.max(s - 1, 0));
 
   const resetApp = () => {
@@ -321,6 +458,8 @@ export default function App() {
       debts: [],
       bills: [],
     });
+    setExpandedDebtId(null);
+    setExpandedBillId(null);
     setStep(0);
   };
 
@@ -339,6 +478,7 @@ export default function App() {
         ...prev.debts,
       ],
     }));
+    setExpandedDebtId(id);
   };
 
   const updateDebt = (id, key, val) => {
@@ -353,6 +493,11 @@ export default function App() {
       ...prev,
       debts: prev.debts.filter((d) => d.id !== id),
     }));
+    setExpandedDebtId((prev) => (prev === id ? null : prev));
+  };
+
+  const toggleDebt = (id) => {
+    setExpandedDebtId((prev) => (prev === id ? null : id));
   };
 
   const addBill = (name = '') => {
@@ -361,6 +506,7 @@ export default function App() {
       ...prev,
       bills: [{ id, name: name || 'New Bill', amount: '' }, ...prev.bills],
     }));
+    setExpandedBillId(id);
   };
 
   const updateBill = (id, key, val) => {
@@ -375,6 +521,11 @@ export default function App() {
       ...prev,
       bills: prev.bills.filter((b) => b.id !== id),
     }));
+    setExpandedBillId((prev) => (prev === id ? null : prev));
+  };
+
+  const toggleBill = (id) => {
+    setExpandedBillId((prev) => (prev === id ? null : id));
   };
 
   const WelcomeView = () => (
@@ -491,19 +642,35 @@ export default function App() {
             Enter your total monthly income (salary + other income combined)
           </p>
           <div className="relative group">
-            <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 font-black text-2xl group-focus-within:text-[#1EB1BB] transition-colors">
+            <span
+              className={`absolute left-6 top-1/2 -translate-y-1/2 font-black text-2xl transition-colors ${
+                incomeMissing
+                  ? 'text-red-300 group-focus-within:text-red-500'
+                  : 'text-slate-300 group-focus-within:text-[#1EB1BB]'
+              }`}
+            >
               {getCurrencySymbol()}
             </span>
             <input
               type="number"
+              min="0"
               value={state.income}
               onChange={(e) =>
                 setState((p) => ({ ...p, income: e.target.value }))
               }
               placeholder="0.00"
-              className="w-full pl-16 pr-6 py-6 rounded-3xl border-2 border-slate-100 focus:border-[#1EB1BB] focus:ring-8 focus:ring-cyan-50 focus:outline-none text-3xl font-black transition-all"
+              className={`w-full pl-16 pr-6 py-6 rounded-3xl border-2 focus:ring-8 focus:outline-none text-3xl font-black transition-all ${
+                incomeMissing
+                  ? 'border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-50'
+                  : 'border-slate-100 focus:border-[#1EB1BB] focus:ring-cyan-50'
+              }`}
             />
           </div>
+          {incomeMissing && (
+            <p className="text-xs text-red-500 font-bold mt-2">
+              Monthly Income is required.
+            </p>
+          )}
         </section>
 
         <section>
@@ -514,19 +681,35 @@ export default function App() {
             Estimate your total monthly spending on food, transport, etc.
           </p>
           <div className="relative group">
-            <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 font-black text-2xl group-focus-within:text-[#1EB1BB] transition-colors">
+            <span
+              className={`absolute left-6 top-1/2 -translate-y-1/2 font-black text-2xl transition-colors ${
+                spendingMissing
+                  ? 'text-red-300 group-focus-within:text-red-500'
+                  : 'text-slate-300 group-focus-within:text-[#1EB1BB]'
+              }`}
+            >
               {getCurrencySymbol()}
             </span>
             <input
               type="number"
+              min="0"
               value={state.everydaySpending}
               onChange={(e) =>
                 setState((p) => ({ ...p, everydaySpending: e.target.value }))
               }
               placeholder="0.00"
-              className="w-full pl-16 pr-6 py-6 rounded-3xl border-2 border-slate-100 focus:border-[#1EB1BB] focus:ring-8 focus:ring-cyan-50 focus:outline-none text-3xl font-black transition-all"
+              className={`w-full pl-16 pr-6 py-6 rounded-3xl border-2 focus:ring-8 focus:outline-none text-3xl font-black transition-all ${
+                spendingMissing
+                  ? 'border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-50'
+                  : 'border-slate-100 focus:border-[#1EB1BB] focus:ring-cyan-50'
+              }`}
             />
           </div>
+          {spendingMissing && (
+            <p className="text-xs text-red-500 font-bold mt-2">
+              Everyday Spending is required.
+            </p>
+          )}
         </section>
       </div>
     </div>
@@ -565,82 +748,180 @@ export default function App() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="space-y-4">
         {state.debts.length === 0 ? (
-          <div className="col-span-full bg-slate-50 rounded-[2.5rem] p-16 text-center border-2 border-dashed border-slate-200 text-slate-400 font-bold italic">
+          <div className="bg-slate-50 rounded-[2.5rem] p-16 text-center border-2 border-dashed border-slate-200 text-slate-400 font-bold italic">
             No debts added yet. Use the presets above to start.
           </div>
         ) : (
-          state.debts.map((debt) => (
-            <div
-              key={debt.id}
-              className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 space-y-6 animate-in hover:shadow-xl hover:border-slate-200 transition-all group"
-            >
-              <div className="flex justify-between items-center">
-                <input
-                  value={debt.name}
-                  onChange={(e) =>
-                    updateDebt(debt.id, 'name', e.target.value)
-                  }
-                  className="font-black text-xl text-[#1B2B4B] focus:outline-none w-full bg-transparent border-b border-transparent focus:border-[#1EB1BB]"
-                  placeholder="Debt Name"
-                />
+          state.debts.map((debt) => {
+            const isOpen = expandedDebtId === debt.id;
+            const status = getDebtStatus(debt);
+
+            const balanceInvalid = isNegative(debt.balance);
+            const interestInvalid = isNegative(debt.interest);
+            const minPaymentInvalid = isNegative(debt.minPayment);
+
+            return (
+              <div
+                key={debt.id}
+                className={`bg-white rounded-[2rem] border shadow-sm transition-all overflow-hidden ${
+                  isOpen
+                    ? 'border-[#1EB1BB] shadow-lg'
+                    : 'border-slate-100 hover:border-slate-200'
+                }`}
+              >
                 <button
-                  onClick={() => removeDebt(debt.id)}
-                  className="text-slate-200 hover:text-red-500 transition-colors p-2"
+                  type="button"
+                  onClick={() => toggleDebt(debt.id)}
+                  className="w-full text-left p-5 md:p-6"
                 >
-                  <Trash2 className="w-5 h-5" />
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <p className="text-lg md:text-xl font-black text-[#1B2B4B] truncate">
+                          {debt.name || 'New Debt'}
+                        </p>
+
+                        <span
+                          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider border ${status.bg} ${status.text} ${status.border}`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${status.dot}`}></span>
+                          {status.label}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-x-4 gap-y-2 mt-3 text-xs md:text-sm text-slate-500">
+                        <span>Balance: {formatValue(debt.balance)}</span>
+                        <span>APR: {Number(debt.interest || 0)}%</span>
+                        <span>Min Pay: {formatValue(debt.minPayment)}/month</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeDebt(debt.id);
+                        }}
+                        className="text-slate-300 hover:text-red-500 transition-colors p-2"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+
+                      <div
+                        className={`w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 transition-transform ${
+                          isOpen ? 'rotate-90' : ''
+                        }`}
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </div>
+                    </div>
+                  </div>
                 </button>
+
+                {isOpen && (
+                  <div className="px-5 md:px-6 pb-6 animate-in border-t border-slate-100">
+                    <div className="pt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
+                          Debt Name
+                        </label>
+                        <input
+                          value={debt.name}
+                          onChange={(e) =>
+                            updateDebt(debt.id, 'name', e.target.value)
+                          }
+                          className="w-full bg-slate-50 p-4 rounded-xl text-sm font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
+                          placeholder="Debt Name"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
+                          Balance
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={debt.balance}
+                          onChange={(e) =>
+                            updateDebt(debt.id, 'balance', e.target.value)
+                          }
+                          className={`w-full p-4 rounded-xl text-sm font-black focus:outline-none ${
+                            balanceInvalid
+                              ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                              : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                          }`}
+                          placeholder="0"
+                        />
+                        {balanceInvalid && (
+                          <p className="text-[10px] text-red-500 font-bold">
+                            Balance cannot be negative.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
+                          APR %
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={debt.interest}
+                          onChange={(e) =>
+                            updateDebt(debt.id, 'interest', e.target.value)
+                          }
+                          className={`w-full p-4 rounded-xl text-sm font-black focus:outline-none ${
+                            interestInvalid
+                              ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                              : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                          }`}
+                          placeholder="0"
+                        />
+                        {interestInvalid ? (
+                          <p className="text-[10px] text-red-500 font-bold">
+                            APR cannot be negative.
+                          </p>
+                        ) : (
+                          <p className="text-[10px] text-slate-400">
+                            Annual interest rate (APR %)
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-1 md:col-span-3">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
+                          Minimum Monthly Payment
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={debt.minPayment}
+                          onChange={(e) =>
+                            updateDebt(debt.id, 'minPayment', e.target.value)
+                          }
+                          className={`w-full p-4 rounded-xl text-sm font-black focus:outline-none ${
+                            minPaymentInvalid
+                              ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                              : 'bg-slate-50 text-[#1EB1BB] focus:ring-2 focus:ring-[#1EB1BB]'
+                          }`}
+                          placeholder="0"
+                        />
+                        {minPaymentInvalid && (
+                          <p className="text-[10px] text-red-500 font-bold">
+                            Minimum payment cannot be negative.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
-                    Balance
-                  </label>
-                  <input
-                    type="number"
-                    value={debt.balance}
-                    onChange={(e) =>
-                      updateDebt(debt.id, 'balance', e.target.value)
-                    }
-                    className="w-full bg-slate-50 p-4 rounded-xl text-sm font-black focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
-                    APR %
-                  </label>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Annual interest rate (APR %)
-                  </p>
-                  <input
-                    type="number"
-                    value={debt.interest}
-                    onChange={(e) =>
-                      updateDebt(debt.id, 'interest', e.target.value)
-                    }
-                    className="w-full bg-slate-50 p-4 rounded-xl text-sm font-black focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
-                    Min Pay
-                  </label>
-                  <input
-                    type="number"
-                    value={debt.minPayment}
-                    onChange={(e) =>
-                      updateDebt(debt.id, 'minPayment', e.target.value)
-                    }
-                    className="w-full bg-slate-50 p-4 rounded-xl text-sm font-black text-[#1EB1BB] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -680,49 +961,130 @@ export default function App() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="space-y-4">
         {state.bills.length === 0 ? (
-          <div className="col-span-full bg-slate-50 rounded-[2rem] p-12 text-center border-2 border-dashed border-slate-200 text-slate-400 font-bold italic">
+          <div className="bg-slate-50 rounded-[2rem] p-12 text-center border-2 border-dashed border-slate-200 text-slate-400 font-bold italic">
             No bills added yet.
           </div>
         ) : (
-          state.bills.map((bill) => (
-            <div
-              key={bill.id}
-              className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 animate-in group hover:border-[#1EB1BB] transition-colors"
-            >
-              <div className="space-y-4">
-                <input
-                  value={bill.name}
-                  onChange={(e) => updateBill(bill.id, 'name', e.target.value)}
-                  className="w-full font-black text-base text-[#1B2B4B] focus:outline-none bg-transparent"
-                  placeholder="Bill Name"
-                />
+          state.bills.map((bill) => {
+            const isOpen = expandedBillId === bill.id;
+            const status = getBillStatus(bill);
+            const amountInvalid = isNegative(bill.amount);
 
-                <div className="relative w-full">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-300 font-bold">
-                    {getCurrencySymbol()}
-                  </span>
-                  <input
-                    type="number"
-                    value={bill.amount}
-                    onChange={(e) => updateBill(bill.id, 'amount', e.target.value)}
-                    className="w-full bg-slate-50 pl-10 pr-4 py-4 rounded-xl text-base font-black text-right focus:outline-none focus:ring-2 focus:ring-[#1EB1BB]"
-                    placeholder="0"
-                  />
-                </div>
+            return (
+              <div
+                key={bill.id}
+                className={`bg-white rounded-[2rem] border shadow-sm transition-all overflow-hidden ${
+                  isOpen
+                    ? 'border-[#1EB1BB] shadow-lg'
+                    : 'border-slate-100 hover:border-slate-200'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleBill(bill.id)}
+                  className="w-full text-left p-5 md:p-6"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <p className="text-base md:text-lg font-black text-[#1B2B4B] truncate">
+                          {bill.name || 'New Bill'}
+                        </p>
 
-                <div className="flex justify-end">
-                  <button
-                    onClick={() => removeBill(bill.id)}
-                    className="text-slate-300 hover:text-red-500 transition-colors p-1"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                        <span
+                          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider border ${status.bg} ${status.text} ${status.border}`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${status.dot}`}></span>
+                          {status.label}
+                        </span>
+                      </div>
+
+                      <p className="mt-3 text-sm text-slate-500">
+                        Amount: {formatValue(bill.amount)}/month
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeBill(bill.id);
+                        }}
+                        className="text-slate-300 hover:text-red-500 transition-colors p-2"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+
+                      <div
+                        className={`w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 transition-transform ${
+                          isOpen ? 'rotate-90' : ''
+                        }`}
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </div>
+                    </div>
+                  </div>
+                </button>
+
+                {isOpen && (
+                  <div className="px-5 md:px-6 pb-6 animate-in border-t border-slate-100">
+                    <div className="pt-6 grid grid-cols-1 md:grid-cols-[1fr_220px] gap-4 items-end">
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
+                          Bill Name
+                        </label>
+                        <input
+                          value={bill.name}
+                          onChange={(e) =>
+                            updateBill(bill.id, 'name', e.target.value)
+                          }
+                          className="w-full bg-slate-50 p-4 rounded-xl text-sm font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
+                          placeholder="Bill Name"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">
+                          Monthly Amount
+                        </label>
+                        <div className="relative w-full">
+                          <span
+                            className={`absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold ${
+                              amountInvalid ? 'text-red-300' : 'text-slate-300'
+                            }`}
+                          >
+                            {getCurrencySymbol()}
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={bill.amount}
+                            onChange={(e) =>
+                              updateBill(bill.id, 'amount', e.target.value)
+                            }
+                            className={`w-full pl-10 pr-4 py-4 rounded-xl text-sm font-black text-right focus:outline-none ${
+                              amountInvalid
+                                ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                                : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                            }`}
+                            placeholder="0"
+                          />
+                        </div>
+                        {amountInvalid && (
+                          <p className="text-[10px] text-red-500 font-bold">
+                            Monthly amount cannot be negative.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -1042,7 +1404,7 @@ export default function App() {
 
       <div className="text-center">
         <button
-          onClick={() => setStep(1)}
+          onClick={() => setStep(2)}
           className="text-slate-400 font-black text-[11px] uppercase tracking-[0.3em] hover:text-[#1EB1BB] transition-colors flex items-center gap-3 mx-auto p-6"
         >
           <PenLine className="w-4 h-4" /> Refine Your Figures
@@ -1117,21 +1479,35 @@ export default function App() {
 
       {step > 1 && step < 5 && (
         <div className="sticky bottom-0 bg-white/90 backdrop-blur-md p-6 border-t border-slate-100 z-40">
-          <div className="flex items-center justify-between w-full max-w-2xl mx-auto gap-4">
-            <button
-              onClick={prevStep}
-              className="flex-1 flex items-center justify-center gap-2 py-5 rounded-2xl font-black text-slate-500 bg-slate-50 hover:bg-slate-100 transition-colors text-sm uppercase tracking-widest"
-            >
-              <ChevronLeft className="w-5 h-5" /> Back
-            </button>
+          <div className="w-full max-w-2xl mx-auto">
+            {!stepValidation.canProceed && (
+              <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-600 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {stepValidation.message}
+              </div>
+            )}
 
-            <button
-              onClick={nextStep}
-              className="flex-[2] bg-[#1B2B4B] text-white py-5 rounded-2xl font-black text-lg hover:bg-slate-800 active:scale-95 transition-all shadow-xl flex items-center justify-center gap-3 uppercase tracking-wider"
-            >
-              {step === 4 ? 'Get Results' : 'Continue'}
-              <ChevronRight className="w-6 h-6" />
-            </button>
+            <div className="flex items-center justify-between gap-4">
+              <button
+                onClick={prevStep}
+                className="flex-1 flex items-center justify-center gap-2 py-5 rounded-2xl font-black text-slate-500 bg-slate-50 hover:bg-slate-100 transition-colors text-sm uppercase tracking-widest"
+              >
+                <ChevronLeft className="w-5 h-5" /> Back
+              </button>
+
+              <button
+                onClick={nextStep}
+                disabled={!stepValidation.canProceed}
+                className={`flex-[2] py-5 rounded-2xl font-black text-lg transition-all shadow-xl flex items-center justify-center gap-3 uppercase tracking-wider ${
+                  stepValidation.canProceed
+                    ? 'bg-[#1B2B4B] text-white hover:bg-slate-800 active:scale-95'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                }`}
+              >
+                {step === 4 ? 'Get Results' : 'Continue'}
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
           </div>
         </div>
       )}
