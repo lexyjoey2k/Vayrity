@@ -2885,7 +2885,9 @@ export default function App() {
         : 0;
 
     const nextFocusDebt =
-      monthlyPlan.debtPlan?.find((debt) => debt.isPriority) || totals.priorityDebt || null;
+      monthlyPlan.debtPlan?.find((debt) => debt.isPriority) ||
+      totals.priorityDebt ||
+      null;
 
     const postTrimBalance = roundMoney(
       toNumber(totals.remaining) + toNumber(trimPlan.totalSuggested)
@@ -2911,6 +2913,31 @@ export default function App() {
       : null;
 
     const trimWasApplied = Boolean(preTrimBudgetSnapshot && trimAppliedDelta > 0);
+
+    const appliedTrimChanges = preTrimBudgetSnapshot
+      ? preTrimBudgetSnapshot
+          .map((previousCategory) => {
+            const updatedCategory = state.budgetCategories.find(
+              (category) => category.id === previousCategory.id
+            );
+
+            const beforeAmount = toNumber(previousCategory.amount);
+            const afterAmount = toNumber(updatedCategory?.amount);
+
+            const difference = roundMoney(beforeAmount - afterAmount);
+
+            if (difference <= 0) return null;
+
+            return {
+              id: previousCategory.id,
+              name: previousCategory.name || 'Budget Category',
+              beforeAmount,
+              afterAmount,
+              difference,
+            };
+          })
+          .filter(Boolean)
+      : [];
 
     const deficitResolvedByTrim = monthlyPlan.type === 'deficit' && trimPlan.covered;
     const canShowDebtAcceleration =
@@ -2966,7 +2993,9 @@ export default function App() {
                   alt="Vayrity logo"
                   className="h-10 w-auto object-contain mb-4"
                 />
-                <h1 className="text-3xl font-black text-[#1B2B4B]">Vayrity Plan Summary</h1>
+                <h1 className="text-3xl font-black text-[#1B2B4B]">
+                  Vayrity Plan Summary
+                </h1>
                 <p className="text-sm text-slate-500 mt-2">
                   Generated on {generatedDate}
                 </p>
@@ -2988,10 +3017,18 @@ export default function App() {
 
             <div className="grid grid-cols-1 gap-8">
               <section>
-                <h2 className="text-lg font-black text-slate-900 mb-4">Financial Snapshot</h2>
+                <h2 className="text-lg font-black text-slate-900 mb-4">
+                  Financial Snapshot
+                </h2>
                 <div className="rounded-2xl border border-slate-200 p-4">
-                  <PrintSummaryRow label="Monthly position" value={formatValue(totals.remaining)} />
-                  <PrintSummaryRow label="Total debt" value={formatValue(totals.totalDebtBalance)} />
+                  <PrintSummaryRow
+                    label="Monthly position"
+                    value={formatValue(totals.remaining)}
+                  />
+                  <PrintSummaryRow
+                    label="Total debt"
+                    value={formatValue(totals.totalDebtBalance)}
+                  />
                   <PrintSummaryRow
                     label="Current savings"
                     value={formatValue(monthlyPlan.currentSavings)}
@@ -3012,15 +3049,23 @@ export default function App() {
               </section>
 
               <section>
-                <h2 className="text-lg font-black text-slate-900 mb-4">Primary Action</h2>
+                <h2 className="text-lg font-black text-slate-900 mb-4">
+                  Primary Action
+                </h2>
                 <div className="rounded-2xl border border-slate-200 p-5">
-                  <p className="text-base font-black text-slate-900">{printPrimaryAction}</p>
-                  <p className="text-sm text-slate-600 mt-2">{monthlyPlan.explanation}</p>
+                  <p className="text-base font-black text-slate-900">
+                    {printPrimaryAction}
+                  </p>
+                  <p className="text-sm text-slate-600 mt-2">
+                    {monthlyPlan.explanation}
+                  </p>
                 </div>
               </section>
 
               <section>
-                <h2 className="text-lg font-black text-slate-900 mb-4">Monthly Plan</h2>
+                <h2 className="text-lg font-black text-slate-900 mb-4">
+                  Monthly Plan
+                </h2>
                 <div className="rounded-2xl border border-slate-200 p-4">
                   {monthlyPlan.type === 'deficit' ? (
                     <>
@@ -3035,7 +3080,10 @@ export default function App() {
                       <PrintSummaryRow
                         label="Balance after suggested trims"
                         value={formatValue(
-                          roundMoney(toNumber(totals.remaining) + toNumber(trimPlan.totalSuggested))
+                          roundMoney(
+                            toNumber(totals.remaining) +
+                              toNumber(trimPlan.totalSuggested)
+                          )
                         )}
                       />
                     </>
@@ -3076,7 +3124,9 @@ export default function App() {
 
               {nextFocusDebt && (
                 <section>
-                  <h2 className="text-lg font-black text-slate-900 mb-4">Priority Debt</h2>
+                  <h2 className="text-lg font-black text-slate-900 mb-4">
+                    Priority Debt
+                  </h2>
                   <div className="rounded-2xl border border-slate-200 p-4">
                     <PrintSummaryRow label="Debt" value={nextFocusDebt.name} />
                     <PrintSummaryRow
@@ -3089,7 +3139,9 @@ export default function App() {
                     />
                     <PrintSummaryRow
                       label="Minimum payment"
-                      value={`${formatValue(nextFocusDebt.minPayment || 0)}/month`}
+                      value={`${formatValue(
+                        nextFocusDebt.minPayment || 0
+                      )}/month`}
                     />
                   </div>
                 </section>
@@ -3097,7 +3149,9 @@ export default function App() {
 
               {monthlyPlan.actions?.length > 0 && (
                 <section>
-                  <h2 className="text-lg font-black text-slate-900 mb-4">Action Checklist</h2>
+                  <h2 className="text-lg font-black text-slate-900 mb-4">
+                    Action Checklist
+                  </h2>
                   <div className="rounded-2xl border border-slate-200 p-5">
                     <ul className="space-y-2 text-sm text-slate-700">
                       {monthlyPlan.actions.slice(0, 5).map((action, index) => (
@@ -3109,7 +3163,9 @@ export default function App() {
               )}
 
               <section>
-                <h2 className="text-lg font-black text-slate-900 mb-4">Recommendation</h2>
+                <h2 className="text-lg font-black text-slate-900 mb-4">
+                  Recommendation
+                </h2>
                 <div className="rounded-2xl border border-slate-200 p-5">
                   <p className="text-sm text-slate-700 leading-relaxed">
                     {monthlyPlan.type === 'deficit'
@@ -3170,7 +3226,7 @@ export default function App() {
                     onClick={applyTrimPlan}
                     className="bg-[#1EB1BB] text-white px-6 py-4 rounded-2xl font-black text-sm uppercase tracking-wider hover:brightness-105 active:scale-95 transition-all shadow-xl ring-4 ring-cyan-200/20"
                   >
-                    Fix my budget automatically
+                    Apply suggested budget cuts
                   </button>
                 )}
 
@@ -3224,7 +3280,9 @@ export default function App() {
               <div className="min-w-0">
                 <p
                   className={`text-[11px] font-black uppercase tracking-wider mb-2 ${
-                    monthlyPlan.type === 'deficit' ? 'text-rose-500' : 'text-[#1EB1BB]'
+                    monthlyPlan.type === 'deficit'
+                      ? 'text-rose-500'
+                      : 'text-[#1EB1BB]'
                   }`}
                 >
                   Monthly Position
@@ -3241,7 +3299,9 @@ export default function App() {
 
               <div
                 className={`shrink-0 ${
-                  monthlyPlan.type === 'deficit' ? 'text-rose-400' : 'text-[#1EB1BB]'
+                  monthlyPlan.type === 'deficit'
+                    ? 'text-rose-400'
+                    : 'text-[#1EB1BB]'
                 }`}
               >
                 {monthlyPlan.type === 'deficit' ? (
@@ -3286,7 +3346,9 @@ export default function App() {
                 </p>
                 <p className="text-sm text-slate-600 mt-2">
                   {hasSavingsTarget
-                    ? `Target: ${formatValue(monthlyPlan.effectiveEmergencyTarget)}`
+                    ? `Target: ${formatValue(
+                        monthlyPlan.effectiveEmergencyTarget
+                      )}`
                     : 'Add a savings target to guide your buffer plan.'}
                 </p>
               </div>
@@ -3328,10 +3390,16 @@ export default function App() {
 
                 <InsightCard
                   eyebrow="Best place to fix first"
-                  value={trimPlan.quickWin?.name || topBudgetCategories[0]?.name || 'Largest category'}
+                  value={
+                    trimPlan.quickWin?.name ||
+                    topBudgetCategories[0]?.name ||
+                    'Largest category'
+                  }
                   description={
                     trimPlan.quickWin
-                      ? `Cutting this by ${formatValue(trimPlan.quickWin.suggestedTrim)} is your fastest fix.`
+                      ? `Cutting this by ${formatValue(
+                          trimPlan.quickWin.suggestedTrim
+                        )} is your fastest fix.`
                       : topBudgetCategories[0]
                       ? `This is currently your biggest category at ${formatValue(
                           topBudgetCategories[0].amount
@@ -3372,7 +3440,7 @@ export default function App() {
                     onClick={applyTrimPlan}
                     className="px-5 py-3 rounded-2xl bg-[#1B2B4B] text-white font-black text-sm uppercase tracking-wider hover:bg-slate-800 transition-colors shrink-0 shadow-lg"
                   >
-                    Fix my budget automatically
+                    Apply suggested budget cuts
                   </button>
                 </div>
 
@@ -3383,9 +3451,12 @@ export default function App() {
                       className="bg-slate-50 rounded-2xl border border-slate-100 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
                     >
                       <div className="min-w-0">
-                        <p className="font-black text-slate-800">{suggestion.name}</p>
+                        <p className="font-black text-slate-800">
+                          {suggestion.name}
+                        </p>
                         <p className="text-sm text-slate-500 mt-1">
-                          Cut by {formatValue(suggestion.suggestedTrim)} ({suggestion.percentTrim}%)
+                          Cut by {formatValue(suggestion.suggestedTrim)} (
+                          {suggestion.percentTrim}%)
                         </p>
                       </div>
 
@@ -3437,14 +3508,14 @@ export default function App() {
                 <SectionIntro
                   icon={<CheckCircle2 className="w-7 h-7" />}
                   eyebrow="Updated plan"
-                  title="Here’s what changed after applying the fix"
-                  description="Your budget has been rebalanced using the suggested trim targets."
+                  title="Here’s exactly what changed"
+                  description="We applied the suggested trim to your flexible budget categories so your monthly position could improve."
                   iconTone="success"
                 />
 
                 <div className="mb-5">
                   <span className="inline-flex items-center px-4 py-2 rounded-full bg-cyan-50 text-[#1EB1BB] text-[11px] font-black uppercase tracking-wider border border-cyan-100">
-                    Plan updated
+                    Budget update applied
                   </span>
                 </div>
 
@@ -3452,13 +3523,13 @@ export default function App() {
                   <InsightCard
                     eyebrow="Budget before"
                     value={formatValue(previousBudgetTotal)}
-                    description="Your previous monthly category total."
+                    description="Your total monthly category budget before the change."
                   />
 
                   <InsightCard
                     eyebrow="Budget after"
                     value={formatValue(currentBudgetTotal)}
-                    description="Your current monthly category total after the trim was applied."
+                    description="Your total monthly category budget after the update."
                     tone="success"
                   />
 
@@ -3466,23 +3537,70 @@ export default function App() {
                     eyebrow="Monthly improvement"
                     value={formatValue(trimAppliedDelta)}
                     description={
-                      balanceAfterAppliedTrim !== null && balanceAfterAppliedTrim >= 0
-                        ? `This moves your monthly balance to about ${formatValue(
+                      balanceAfterAppliedTrim !== null &&
+                      balanceAfterAppliedTrim >= 0
+                        ? `This moved your monthly balance to about ${formatValue(
                             balanceAfterAppliedTrim
                           )}.`
-                        : `This improves your monthly balance by ${formatValue(
+                        : `This improved your monthly balance by ${formatValue(
                             trimAppliedDelta
-                          )}.`
+                          )}, but you may still need one more adjustment.`
                     }
                     tone="success"
                   />
                 </div>
 
+                {appliedTrimChanges.length > 0 && (
+                  <div className="mt-6 bg-slate-50 rounded-2xl border border-slate-100 p-5">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-3">
+                      Changes made
+                    </p>
+
+                    <div className="space-y-3">
+                      {appliedTrimChanges.map((change) => (
+                        <div
+                          key={change.id}
+                          className="bg-white rounded-2xl border border-slate-100 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-black text-slate-800">
+                              {change.name}
+                            </p>
+                            <p className="text-sm text-slate-500 mt-1">
+                              Reduced by {formatValue(change.difference)}
+                            </p>
+                          </div>
+
+                          <div className="text-left md:text-right">
+                            <p className="text-sm text-slate-500">
+                              {formatValue(change.beforeAmount)} →{' '}
+                              <span className="font-black text-slate-800">
+                                {formatValue(change.afterAmount)}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="mt-6 rounded-2xl border border-cyan-100 bg-cyan-50 p-4 md:p-5">
-                  <p className="text-sm font-black text-slate-800">
-                    {balanceAfterAppliedTrim !== null && balanceAfterAppliedTrim >= 0
-                      ? 'You are no longer in a monthly deficit based on the applied trim.'
-                      : 'You have reduced the monthly pressure, but may still need one more adjustment.'}
+                  <p className="text-sm font-black text-slate-800 mb-2">
+                    What this means
+                  </p>
+
+                  <p className="text-sm text-slate-700 leading-relaxed">
+                    {balanceAfterAppliedTrim !== null &&
+                    balanceAfterAppliedTrim >= 0
+                      ? `Your budget was reduced by ${formatValue(
+                          trimAppliedDelta
+                        )} across flexible categories. That was enough to move you from a monthly deficit into a positive monthly balance of about ${formatValue(
+                          balanceAfterAppliedTrim
+                        )}.`
+                      : `Your budget was reduced by ${formatValue(
+                          trimAppliedDelta
+                        )}, which improved your monthly position, but you may still need one more change to fully remove the deficit.`}
                   </p>
                 </div>
               </div>
@@ -3498,8 +3616,9 @@ export default function App() {
                     Review essential costs or income
                   </h3>
                   <p className="text-slate-500 mt-2">
-                    You do not currently have flexible spending listed to trim, so the next move is
-                    to review essential costs or increase income.
+                    You do not currently have flexible spending listed to trim,
+                    so the next move is to review essential costs or increase
+                    income.
                   </p>
                 </div>
 
@@ -3529,7 +3648,11 @@ export default function App() {
               <SectionIntro
                 icon={<Target className="w-7 h-7" />}
                 eyebrow="Step 3"
-                title={hasActiveDebt ? 'Then accelerate debt payoff' : 'Then build your savings'}
+                title={
+                  hasActiveDebt
+                    ? 'Then accelerate debt payoff'
+                    : 'Then build your savings'
+                }
                 description={
                   hasActiveDebt
                     ? 'Once your monthly balance is stable, focus your extra cash on your priority debt.'
@@ -3557,7 +3680,11 @@ export default function App() {
                 />
 
                 <InsightCard
-                  eyebrow={hasActiveDebt ? 'Estimated payoff at current payment' : 'Savings target'}
+                  eyebrow={
+                    hasActiveDebt
+                      ? 'Estimated payoff at current payment'
+                      : 'Savings target'
+                  }
                   value={
                     hasActiveDebt
                       ? totals.payoffEstimate?.valid
@@ -3662,7 +3789,8 @@ export default function App() {
                       Pay Towards Your Debts
                     </p>
                     <p className="text-sm text-slate-500">
-                      Keep minimums covered. Route the extra automatically using your chosen strategy.
+                      Keep minimums covered. Route the extra automatically using
+                      your chosen strategy.
                     </p>
                   </div>
                 </div>
@@ -3711,7 +3839,8 @@ export default function App() {
                         {debt.payoffEstimate.valid && (
                           <p className="text-xs text-slate-500 mt-3">
                             At this payment, this debt alone would take about{' '}
-                            {formatMonthsLabel(debt.payoffEstimate.months)} to clear.
+                            {formatMonthsLabel(debt.payoffEstimate.months)} to
+                            clear.
                           </p>
                         )}
                       </div>
@@ -3720,7 +3849,8 @@ export default function App() {
                 ) : (
                   <div className="bg-white rounded-2xl border border-slate-100 p-5">
                     <p className="text-slate-600">
-                      No debt added, so your available money can go fully into savings.
+                      No debt added, so your available money can go fully into
+                      savings.
                     </p>
                   </div>
                 )}
@@ -3754,8 +3884,9 @@ export default function App() {
                     Current savings: {formatValue(monthlyPlan.currentSavings)}
                   </p>
                   <p className="text-xs text-slate-400 mt-2 break-words">
-                    Your own target: {formatValue(monthlyPlan.emergencyTarget)} · Recommended based
-                    on essentials: {formatValue(monthlyPlan.recommendedEmergencyTarget)}
+                    Your own target: {formatValue(monthlyPlan.emergencyTarget)} ·
+                    Recommended based on essentials:{' '}
+                    {formatValue(monthlyPlan.recommendedEmergencyTarget)}
                   </p>
 
                   <div className="mt-5">
@@ -3824,7 +3955,9 @@ export default function App() {
                     <InsightCard
                       eyebrow="First likely payoff"
                       value={firstPayoffMoment.name}
-                      description={`Expected ${getMonthsFromNowLabel(firstPayoffMoment.month)}`}
+                      description={`Expected ${getMonthsFromNowLabel(
+                        firstPayoffMoment.month
+                      )}`}
                     />
                   )}
                 </div>
@@ -3841,14 +3974,19 @@ export default function App() {
                       Fastest Lever
                     </p>
                     <p className="text-sm text-slate-500">
-                      The easiest place to improve this plan if you want faster results.
+                      The easiest place to improve this plan if you want faster
+                      results.
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-4">
                   <InsightCard
-                    eyebrow={hasFlexibleSpending ? 'Flexible spending' : 'Spending structure'}
+                    eyebrow={
+                      hasFlexibleSpending
+                        ? 'Flexible spending'
+                        : 'Spending structure'
+                    }
                     value={formatValue(totals.nonEssentialBudgetTotal)}
                     description={
                       hasFlexibleSpending
@@ -3858,13 +3996,19 @@ export default function App() {
                   />
 
                   <InsightCard
-                    eyebrow={hasFlexibleSpending ? 'First category to review' : 'Largest category'}
+                    eyebrow={
+                      hasFlexibleSpending
+                        ? 'First category to review'
+                        : 'Largest category'
+                    }
                     value={topBudgetCategories[0]?.name || 'None added'}
                     description={
                       topBudgetCategories[0]
                         ? hasFlexibleSpending
                           ? formatValue(topBudgetCategories[0].amount)
-                          : `${formatValue(topBudgetCategories[0].amount)} · mostly essentials`
+                          : `${formatValue(
+                              topBudgetCategories[0].amount
+                            )} · mostly essentials`
                         : 'Add categories to see your biggest cost.'
                     }
                   />
@@ -3894,7 +4038,8 @@ export default function App() {
 
                   {monthlyPlan.interestSavedVsMinimums > 0 && (
                     <p className="text-sm font-bold text-[#1EB1BB] mt-4">
-                      This plan could save about {formatValue(monthlyPlan.interestSavedVsMinimums)} in
+                      This plan could save about{' '}
+                      {formatValue(monthlyPlan.interestSavedVsMinimums)} in
                       interest versus staying at minimum payments only.
                     </p>
                   )}
@@ -3916,7 +4061,8 @@ export default function App() {
               monthlyPlan?.debtTimeline?.valid &&
               monthlyPlan.debtPlan.length > 1 &&
               (Math.abs(comparisonInterestDelta) >= 25 ||
-                comparisonPlan.debtTimeline.months !== monthlyPlan.debtTimeline.months) && (
+                comparisonPlan.debtTimeline.months !==
+                  monthlyPlan.debtTimeline.months) && (
                 <div className="mt-6 bg-white border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-5 md:p-8">
                   <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
                     Strategy Comparison
@@ -3967,10 +4113,13 @@ export default function App() {
                           ? 'Very similar'
                           : comparisonInterestDelta > 0
                           ? `${formatValue(comparisonInterestDelta)} less interest`
-                          : `${formatValue(Math.abs(comparisonInterestDelta))} more interest`}
+                          : `${formatValue(
+                              Math.abs(comparisonInterestDelta)
+                            )} more interest`}
                       </p>
                       <p className="text-sm text-slate-500 mt-2">
-                        Use this to balance quick wins against total interest cost.
+                        Use this to balance quick wins against total interest
+                        cost.
                       </p>
                     </div>
                   </div>
@@ -3979,154 +4128,168 @@ export default function App() {
           </section>
         )}
 
-        {canShowDebtAcceleration && hasActiveDebt && totals.priorityDebt && totals.payoffEstimate && (
-          <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-            <h3 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2 min-w-0">
-              <Info className="w-4 h-4 shrink-0" /> Estimated payoff for{' '}
-              {totals.priorityDebt.name || 'your priority debt'}
-            </h3>
+        {canShowDebtAcceleration &&
+          hasActiveDebt &&
+          totals.priorityDebt &&
+          totals.payoffEstimate && (
+            <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+              <h3 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2 min-w-0">
+                <Info className="w-4 h-4 shrink-0" /> Estimated payoff for{' '}
+                {totals.priorityDebt.name || 'your priority debt'}
+              </h3>
 
-            {monthlyPlan.type === 'deficit' && (
-              <div className="mb-6 bg-amber-50 border border-amber-100 rounded-2xl p-4">
-                <p className="text-sm font-bold text-slate-800">
-                  Use this as your next step after you fix the monthly gap.
-                </p>
-              </div>
-            )}
+              {monthlyPlan.type === 'deficit' && (
+                <div className="mb-6 bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                  <p className="text-sm font-bold text-slate-800">
+                    Use this as your next step after you fix the monthly gap.
+                  </p>
+                </div>
+              )}
 
-            {totals.payoffEstimate.valid ? (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
+              {totals.payoffEstimate.valid ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
+                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                        Estimated payoff time
+                      </p>
+                      <p className="text-2xl font-black text-slate-800 break-words">
+                        {formatMonthsLabel(totals.payoffEstimate.months)}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-1 break-words">
+                        At your current payment of{' '}
+                        {formatValue(totals.priorityDebt.minPayment)} per month,{' '}
+                        {totals.priorityDebt.name || 'this debt'} could be
+                        cleared in about{' '}
+                        {formatMonthsLabel(totals.payoffEstimate.months)}.
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
+                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                        Estimated interest paid
+                      </p>
+                      <p className="text-2xl font-black text-slate-800 break-words">
+                        {formatValue(totals.payoffEstimate.totalInterest)}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-1 break-words">
+                        If you keep paying the same amount, you may pay about{' '}
+                        {formatValue(totals.payoffEstimate.totalInterest)} in
+                        interest on {totals.priorityDebt.name || 'this debt'}{' '}
+                        over that time.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
                     <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                      Estimated payoff time
+                      Current monthly payment
                     </p>
                     <p className="text-2xl font-black text-slate-800 break-words">
-                      {formatMonthsLabel(totals.payoffEstimate.months)}
+                      {formatValue(totals.priorityDebt.minPayment)}
                     </p>
-                    <p className="text-sm text-slate-500 mt-1 break-words">
-                      At your current payment of {formatValue(totals.priorityDebt.minPayment)} per
-                      month, {totals.priorityDebt.name || 'this debt'} could be cleared in about{' '}
-                      {formatMonthsLabel(totals.payoffEstimate.months)}.
+                    <p className="text-sm text-slate-500 mt-1">
+                      Based on what you entered, this is the monthly amount
+                      currently being used to estimate the payoff time above for
+                      this debt.
                     </p>
                   </div>
 
-                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                      Estimated interest paid
-                    </p>
-                    <p className="text-2xl font-black text-slate-800 break-words">
-                      {formatValue(totals.payoffEstimate.totalInterest)}
-                    </p>
-                    <p className="text-sm text-slate-500 mt-1 break-words">
-                      If you keep paying the same amount, you may pay about{' '}
-                      {formatValue(totals.payoffEstimate.totalInterest)} in interest on{' '}
-                      {totals.priorityDebt.name || 'this debt'} over that time.
-                    </p>
+                  <div className="mt-6">
+                    <h4 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-4">
+                      Suggested monthly payments for this debt
+                    </h4>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {totals.targetPaymentOptions.map((option) => (
+                        <div
+                          key={option.months}
+                          className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0"
+                        >
+                          <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                            {option.label}
+                          </p>
+
+                          {option.result.valid ? (
+                            <>
+                              <p className="text-2xl font-black text-slate-800 break-words">
+                                {formatValue(option.result.monthlyPayment)}/month
+                              </p>
+                              <p className="text-sm text-slate-500 mt-1 break-words">
+                                To aim for repayment in about {option.months}{' '}
+                                months, you may need to pay around{' '}
+                                {formatValue(option.result.monthlyPayment)} each
+                                month on this debt.
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-sm text-slate-500">
+                              Add clearer balance, APR, and payment details to
+                              estimate this target.
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                </>
+              ) : (
+                <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
+                  <div className="text-slate-700">
+                    {totals.payoffEstimate.reason === 'missing_values' && (
+                      <p>
+                        Add balance, APR, and minimum payment to see an estimate
+                        for this debt.
+                      </p>
+                    )}
 
-                <div className="mt-6 bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
-                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                    Current monthly payment
-                  </p>
-                  <p className="text-2xl font-black text-slate-800 break-words">
-                    {formatValue(totals.priorityDebt.minPayment)}
-                  </p>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Based on what you entered, this is the monthly amount currently being used to
-                    estimate the payoff time above for this debt.
-                  </p>
-                </div>
-
-                <div className="mt-6">
-                  <h4 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-4">
-                    Suggested monthly payments for this debt
-                  </h4>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {totals.targetPaymentOptions.map((option) => (
-                      <div
-                        key={option.months}
-                        className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0"
-                      >
-                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                          {option.label}
+                    {totals.payoffEstimate.reason === 'payment_too_low' && (
+                      <>
+                        <p>
+                          Your current payment may be too low to bring this debt
+                          down. Based on the balance and APR entered, the
+                          interest added each month may be higher than your
+                          monthly payment.
                         </p>
 
-                        {option.result.valid ? (
-                          <>
-                            <p className="text-2xl font-black text-slate-800 break-words">
-                              {formatValue(option.result.monthlyPayment)}/month
+                        {(() => {
+                          const minNeeded = calculateMinimumPaymentToReduce(
+                            totals.priorityDebt.balance,
+                            totals.priorityDebt.interest
+                          );
+
+                          return minNeeded ? (
+                            <p className="text-sm text-[#1EB1BB] font-bold mt-2">
+                              You may need to pay at least{' '}
+                              {formatValue(minNeeded)} per month for this debt
+                              to start reducing.
                             </p>
-                            <p className="text-sm text-slate-500 mt-1 break-words">
-                              To aim for repayment in about {option.months} months, you may need to
-                              pay around {formatValue(option.result.monthlyPayment)} each month on
-                              this debt.
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-sm text-slate-500">
-                            Add clearer balance, APR, and payment details to estimate this target.
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                          ) : null;
+                        })()}
+
+                        <p className="text-sm text-slate-500 mt-2">
+                          Try increasing your monthly payment or check your
+                          latest statement to confirm the required repayment.
+                        </p>
+                      </>
+                    )}
+
+                    {totals.payoffEstimate.reason === 'too_long' && (
+                      <p>
+                        At this payment level, this debt may take a very long
+                        time to clear.
+                      </p>
+                    )}
                   </div>
                 </div>
-              </>
-            ) : (
-              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100">
-                <div className="text-slate-700">
-                  {totals.payoffEstimate.reason === 'missing_values' && (
-                    <p>
-                      Add balance, APR, and minimum payment to see an estimate for this debt.
-                    </p>
-                  )}
+              )}
 
-                  {totals.payoffEstimate.reason === 'payment_too_low' && (
-                    <>
-                      <p>
-                        Your current payment may be too low to bring this debt down. Based on the
-                        balance and APR entered, the interest added each month may be higher than
-                        your monthly payment.
-                      </p>
-
-                      {(() => {
-                        const minNeeded = calculateMinimumPaymentToReduce(
-                          totals.priorityDebt.balance,
-                          totals.priorityDebt.interest
-                        );
-
-                        return minNeeded ? (
-                          <p className="text-sm text-[#1EB1BB] font-bold mt-2">
-                            You may need to pay at least {formatValue(minNeeded)} per month for this
-                            debt to start reducing.
-                          </p>
-                        ) : null;
-                      })()}
-
-                      <p className="text-sm text-slate-500 mt-2">
-                        Try increasing your monthly payment or check your latest statement to confirm
-                        the required repayment.
-                      </p>
-                    </>
-                  )}
-
-                  {totals.payoffEstimate.reason === 'too_long' && (
-                    <p>
-                      At this payment level, this debt may take a very long time to clear.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <p className="text-xs text-slate-400 mt-4">
-              Estimates assume the interest rate stays the same and no new borrowing is added.
-            </p>
-          </div>
-        )}
+              <p className="text-xs text-slate-400 mt-4">
+                Estimates assume the interest rate stays the same and no new
+                borrowing is added.
+              </p>
+            </div>
+          )}
 
         <div
           className={`bg-white p-6 md:p-16 rounded-[2rem] md:rounded-[3rem] border-2 shadow-xl ${totals.tier.border} max-w-3xl mx-auto w-full relative overflow-hidden`}
@@ -4177,7 +4340,8 @@ export default function App() {
 
                   <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
                     <p className="text-slate-700 leading-relaxed">
-                      Best move: follow the plan consistently and protect the extra payment going to{' '}
+                      Best move: follow the plan consistently and protect the
+                      extra payment going to{' '}
                       {nextFocusDebt?.name || 'your target debt'}.
                     </p>
                   </div>
@@ -4191,7 +4355,9 @@ export default function App() {
                       </p>
                       <p className="text-slate-600 text-sm mt-2 break-words">
                         {hasFlexibleSpending
-                          ? `It is your largest category at ${formatValue(topBudgetCategories[0].amount)}.`
+                          ? `It is your largest category at ${formatValue(
+                              topBudgetCategories[0].amount
+                            )}.`
                           : `It is currently your biggest listed cost at ${formatValue(
                               topBudgetCategories[0].amount
                             )}.`}
@@ -4293,7 +4459,9 @@ export default function App() {
             {!stepValidation.canProceed && (
               <div className="mb-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-600 flex items-center gap-2 min-w-0">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span className="min-w-0 break-words">{stepValidation.message}</span>
+                <span className="min-w-0 break-words">
+                  {stepValidation.message}
+                </span>
               </div>
             )}
 
@@ -4314,7 +4482,9 @@ export default function App() {
                     : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                 }`}
               >
-                <span className="truncate">{step === 4 ? 'Get Results' : 'Continue'}</span>
+                <span className="truncate">
+                  {step === 4 ? 'Get Results' : 'Continue'}
+                </span>
                 <ChevronRight className="w-6 h-6 shrink-0" />
               </button>
             </div>
@@ -4354,7 +4524,8 @@ export default function App() {
             <div className="min-w-0">
               <p className="font-black text-sm">Trim targets applied</p>
               <p className="text-xs text-white/70">
-                Your budget has been updated. Check the Results screen to compare before vs after.
+                Your budget has been updated. Check the Results screen to compare
+                before vs after.
               </p>
             </div>
 
@@ -4389,8 +4560,8 @@ export default function App() {
             </h3>
 
             <p className="text-slate-500 leading-relaxed mb-6">
-              This will clear your income, budget categories, debts, bills, savings setup, and
-              saved progress. This action cannot be undone.
+              This will clear your income, budget categories, debts, bills,
+              savings setup, and saved progress. This action cannot be undone.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
@@ -4463,19 +4634,19 @@ export default function App() {
 
           .print-summary,
           .print-summary * {
-            visibility: visible;
+            visibility: visible !important;
           }
 
           .print-summary {
             display: block !important;
-            position: relative;
-            left: 0;
-            top: 0;
+            position: absolute;
+            inset: 0;
             width: 100%;
+            background: white !important;
+            z-index: 9999;
           }
 
           header,
-          main > *:not(.print-summary),
           .sticky,
           button,
           .no-print {
