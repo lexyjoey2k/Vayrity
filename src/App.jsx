@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ChevronRight,
   ChevronLeft,
@@ -60,6 +60,7 @@ const BUDGET_CATEGORY_PRESETS = [
 ];
 
 const DEFAULT_EMERGENCY_FUND_FLOOR = 500;
+
 const PAYOFF_STRATEGIES = {
   avalanche: 'avalanche',
   snowball: 'snowball',
@@ -67,6 +68,7 @@ const PAYOFF_STRATEGIES = {
 
 const PAYOFF_TARGET_MONTHS = [6, 12, 24];
 
+// --- Factories ---
 const createBudgetCategory = (name = '', type = 'essential') => ({
   id: crypto.randomUUID(),
   name: name || 'New Category',
@@ -100,12 +102,15 @@ const toNumber = (value) => {
 
 const isNegative = (value) => isFilled(value) && toNumber(value) < 0;
 
-const roundMoney = (value) => Math.round((toNumber(value) || 0) * 100) / 100;
+const roundMoney = (value) => Math.round(toNumber(value) * 100) / 100;
 
 const ceilMoney = (value) => Math.ceil(toNumber(value) || 0);
 
 const clamp = (value, min, max) =>
   Math.min(Math.max(toNumber(value), min), max);
+
+const sumBy = (items, selector) =>
+  items.reduce((sum, item) => sum + toNumber(selector(item)), 0);
 
 const formatMonthsLabel = (months) => {
   if (!Number.isFinite(months) || months <= 0) return '0 months';
@@ -128,19 +133,16 @@ const getMonthsFromNowLabel = (months) => {
   }`;
 };
 
-const sumBy = (items, selector) =>
-  items.reduce((sum, item) => sum + toNumber(selector(item)), 0);
-
 const sortDebtsByStrategy = (debts, strategy = PAYOFF_STRATEGIES.avalanche) => {
-  const activeDebts = debts.filter((d) => toNumber(d.balance) > 0.01);
+  const activeDebts = debts.filter((debt) => toNumber(debt.balance) > 0.01);
 
   if (strategy === PAYOFF_STRATEGIES.snowball) {
     return [...activeDebts].sort((a, b) => {
       const balanceDiff = toNumber(a.balance) - toNumber(b.balance);
       if (balanceDiff !== 0) return balanceDiff;
 
-      const interestDiff = toNumber(b.interest) - toNumber(a.interest);
-      if (interestDiff !== 0) return interestDiff;
+      const aprDiff = toNumber(b.interest) - toNumber(a.interest);
+      if (aprDiff !== 0) return aprDiff;
 
       return (a.name || '').localeCompare(b.name || '');
     });
@@ -160,12 +162,15 @@ const sortDebtsByStrategy = (debts, strategy = PAYOFF_STRATEGIES.avalanche) => {
 const getRecommendedEmergencyTarget = (state) => {
   const billsTotal = sumBy(state.bills || [], (bill) => bill.amount);
   const essentialBudgetTotal = sumBy(
-    (state.budgetCategories || []).filter((category) => category.type === 'essential'),
+    (state.budgetCategories || []).filter(
+      (category) => category.type === 'essential'
+    ),
     (category) => category.amount
   );
   const minimumDebtTotal = sumBy(state.debts || [], (debt) => debt.minPayment);
 
-  const baseMonthlyEssentials = billsTotal + essentialBudgetTotal + minimumDebtTotal;
+  const baseMonthlyEssentials =
+    billsTotal + essentialBudgetTotal + minimumDebtTotal;
 
   if (baseMonthlyEssentials <= 0) {
     return DEFAULT_EMERGENCY_FUND_FLOOR;
@@ -209,12 +214,14 @@ const normalizeLoadedState = (parsed) => {
     migratedBudgetCategories = fallbackBudgetCategories;
   }
 
-  const normalizedBudgetCategories = migratedBudgetCategories.map((category) => ({
-    id: category.id || crypto.randomUUID(),
-    name: category.name || 'New Category',
-    amount: category.amount ?? '',
-    type: category.type === 'non-essential' ? 'non-essential' : 'essential',
-  }));
+  const normalizedBudgetCategories = migratedBudgetCategories.map(
+    (category) => ({
+      id: category.id || crypto.randomUUID(),
+      name: category.name || 'New Category',
+      amount: category.amount ?? '',
+      type: category.type === 'non-essential' ? 'non-essential' : 'essential',
+    })
+  );
 
   const normalizedDebts = Array.isArray(parsed?.debts)
     ? parsed.debts.map((debt) => ({
@@ -353,7 +360,11 @@ const calculateRequiredMonthlyPayment = (balance, apr, targetMonths) => {
   }
 
   const requiredPayment = ceilMoney(high);
-  const finalEstimate = calculateDebtPayoff(principal, annualRate, requiredPayment);
+  const finalEstimate = calculateDebtPayoff(
+    principal,
+    annualRate,
+    requiredPayment
+  );
 
   return {
     valid: finalEstimate.valid,
@@ -486,6 +497,7 @@ const calculateSavingsDebtBlend = (state, totals) => {
   const currentSavings = toNumber(state.savings?.current);
   const userEmergencyTarget = toNumber(state.savings?.emergencyTarget);
   const recommendedEmergencyTarget = getRecommendedEmergencyTarget(state);
+
   const emergencyTarget = Math.max(
     userEmergencyTarget || DEFAULT_EMERGENCY_FUND_FLOOR,
     DEFAULT_EMERGENCY_FUND_FLOOR
@@ -493,12 +505,17 @@ const calculateSavingsDebtBlend = (state, totals) => {
 
   const effectiveEmergencyTarget = Math.max(
     emergencyTarget,
-    Math.min(recommendedEmergencyTarget, emergencyTarget * 3 || recommendedEmergencyTarget)
+    Math.min(
+      recommendedEmergencyTarget,
+      emergencyTarget * 3 || recommendedEmergencyTarget
+    )
   );
 
   const emergencyGap = Math.max(0, effectiveEmergencyTarget - currentSavings);
   const remaining = toNumber(totals.remaining);
-  const validDebts = (state.debts || []).filter((debt) => toNumber(debt.balance) > 0);
+  const validDebts = (state.debts || []).filter(
+    (debt) => toNumber(debt.balance) > 0
+  );
 
   return {
     currentSavings,
@@ -529,6 +546,8 @@ const calculateMonthlyPlan = (
   } = calculateSavingsDebtBlend(state, totals);
 
   if (remaining <= 0) {
+    const shortfall = Math.abs(remaining);
+
     return {
       type: 'deficit',
       strategy,
@@ -546,13 +565,14 @@ const calculateMonthlyPlan = (
         ? calculatePortfolioPayoff(state.debts, 0, strategy)
         : null,
       emergencyFundMonths: null,
-      actionHeadline: 'Stabilise your monthly cash flow first',
+      actionHeadline: 'Fix the monthly gap first',
       explanation:
-        'Focus first on reducing flexible spending or increasing income before accelerating debt payments.',
+        'You are currently running a monthly shortfall. The most important move is to get back to zero before trying to speed up debt payoff.',
       actions: [
-        'Keep all minimum debt payments current.',
-        'Reduce flexible spending to remove the monthly shortfall.',
-        'Once you are back to break-even, redirect freed cash into savings and debt payoff.',
+        `Close the monthly gap of ${shortfall} first.`,
+        'Keep every debt at least at its minimum payment.',
+        'Reduce flexible spending before changing essential costs where possible.',
+        'Once your monthly balance reaches zero or above, restart accelerated debt payoff.',
       ],
     };
   }
@@ -578,7 +598,9 @@ const calculateMonthlyPlan = (
 
     debtAllocation = Math.max(0, roundMoney(remaining - savingsAllocation));
   } else {
-    savingsAllocation = roundMoney(Math.min(Math.max(remaining * 0.15, 25), remaining * 0.3));
+    savingsAllocation = roundMoney(
+      Math.min(Math.max(remaining * 0.15, 25), remaining * 0.3)
+    );
     debtAllocation = Math.max(0, roundMoney(remaining - savingsAllocation));
   }
 
@@ -617,24 +639,24 @@ const calculateMonthlyPlan = (
     ? calculatePortfolioPayoff(state.debts, debtAllocation, strategy)
     : {
         valid: true,
+        strategy,
         months: 0,
         totalInterest: 0,
         payoffOrder: [],
         payoffMoments: [],
         monthlySnapshots: [],
-        strategy,
       };
 
   const debtTimelineWithoutExtra = hasDebt
     ? calculatePortfolioPayoff(state.debts, 0, strategy)
     : {
         valid: true,
+        strategy,
         months: 0,
         totalInterest: 0,
         payoffOrder: [],
         payoffMoments: [],
         monthlySnapshots: [],
-        strategy,
       };
 
   const interestSavedVsMinimums =
@@ -652,7 +674,8 @@ const calculateMonthlyPlan = (
     debtTimeline.valid && debtTimelineWithoutExtra.valid
       ? Math.max(
           0,
-          toNumber(debtTimelineWithoutExtra.months) - toNumber(debtTimeline.months)
+          toNumber(debtTimelineWithoutExtra.months) -
+            toNumber(debtTimeline.months)
         )
       : 0;
 
@@ -664,40 +687,52 @@ const calculateMonthlyPlan = (
       : null;
 
   const firstPayoffMoment = debtTimeline?.payoffMoments?.[0] || null;
+  const focusDebt = debtPlan.find((debt) => debt.isPriority) || null;
+
   const actionHeadline =
     emergencyGap > 0
-      ? 'Build a safety buffer while still speeding up debt payoff'
-      : 'Keep savings alive while pushing surplus into debt payoff';
+      ? 'Build your buffer while reducing debt'
+      : 'Keep saving while pushing harder on debt';
 
   const explanation =
     emergencyGap > 0
-      ? 'This plan protects momentum in two ways: it builds your emergency buffer so you are less likely to borrow again, while still targeting your most efficient debt payoff path.'
-      : 'This plan keeps a smaller savings habit in place while directing most of your spare cash to the debt strategy that clears interest fastest.';
+      ? 'This plan splits your spare cash between building a safety buffer and reducing debt. That lowers the risk of borrowing again while still moving you forward.'
+      : 'This plan keeps your savings habit going while sending most of your surplus toward faster debt payoff.';
 
   const actions = [];
 
   if (savingsAllocation > 0) {
-    actions.push(
-      emergencyGap > 0
-        ? `Move ${savingsAllocation} per month into savings until your buffer reaches ${effectiveEmergencyTarget}.`
-        : `Keep setting aside ${savingsAllocation} per month so savings continue to grow.`
-    );
-  }
-
-  if (debtPlan.length > 0) {
-    const focusDebt = debtPlan.find((debt) => debt.isPriority);
-    if (focusDebt) {
+    if (emergencyGap > 0) {
       actions.push(
-        `Pay all debt minimums, then send the extra ${debtAllocation} to ${focusDebt.name}.`
+        `Send ${savingsAllocation} per month to savings until you reach about ${effectiveEmergencyTarget}.`
+      );
+    } else {
+      actions.push(
+        `Keep adding ${savingsAllocation} per month to savings so your buffer keeps growing.`
       );
     }
   }
 
+  if (hasDebt && focusDebt) {
+    actions.push(
+      `Keep all minimum payments in place, then send the extra ${debtAllocation} to ${focusDebt.name}.`
+    );
+  }
+
   if (firstPayoffMoment) {
     actions.push(
-      `Your first likely payoff is ${firstPayoffMoment.name} ${getMonthsFromNowLabel(
+      `${firstPayoffMoment.name} is your first likely payoff ${getMonthsFromNowLabel(
         firstPayoffMoment.month
-      )}. Roll that freed payment into the next debt automatically.`
+      )}.`
+    );
+    actions.push(
+      'When that debt is cleared, roll its payment into the next debt automatically.'
+    );
+  }
+
+  if (monthsSavedVsMinimums > 0) {
+    actions.push(
+      `This plan could make you debt-free about ${monthsSavedVsMinimums} months sooner than minimum payments only.`
     );
   }
 
@@ -788,81 +823,116 @@ const calculateTrimSuggestions = (totals, categories) => {
   };
 };
 
-const buildResultActions = ({ totals, monthlyPlan, trimPlan, state }) => {
+const buildResultActions = ({ totals, monthlyPlan, trimPlan, state, formatValue }) => {
   const actions = [];
+  const nonEssentialTotal = sumBy(
+    (state.budgetCategories || []).filter(
+      (category) => category.type === 'non-essential'
+    ),
+    (category) => category.amount
+  );
+
+  const focusDebt =
+    monthlyPlan?.debtPlan?.find((debt) => debt.isPriority) ||
+    totals.priorityDebt ||
+    null;
 
   if (monthlyPlan.type === 'deficit') {
     if (trimPlan.quickWin) {
       actions.push({
-        title: `Trim ${trimPlan.quickWin.name}`,
-        detail: `Reducing it by ${trimPlan.quickWin.suggestedTrim} would be your fastest first move.`,
+        title: `Reduce ${trimPlan.quickWin.name}`,
+        detail: `Cutting ${formatValue(trimPlan.quickWin.suggestedTrim)} from this category is your fastest way back to zero.`,
         tone: 'warning',
       });
     }
 
     actions.push({
-      title: 'Hold extra debt overpayments for now',
-      detail:
-        'Until your monthly plan is back above zero, stabilising cash flow matters more than aggressive overpayments.',
-      tone: 'warning',
-    });
+      title: 'Get back to zero first',
+      detail: `Your first target is to remove the ${formatValue(
+        Math.abs(monthlyPlan.surplus)
+      )} monthly gap before accelerating debt payoff.`,
+        tone: 'warning',
+      });
 
-    actions.push({
-      title: 'Protect minimum debt payments',
-      detail:
-        'Keep every minimum covered to avoid fees and further pressure.',
-      tone: 'neutral',
-    });
+    if (trimPlan.covered) {
+      actions.push({
+        title: 'Use the trim plan as your reset',
+        detail: `Your current trim suggestions would move your monthly balance to about ${formatValue(
+          toNumber(totals.remaining) + toNumber(trimPlan.totalSuggested)
+        )}.`,
+        tone: 'success',
+      });
+    }
+
+    if (focusDebt) {
+      actions.push({
+        title: `Keep ${focusDebt.name} current`,
+        detail: 'Keep all minimum debt payments current while you stabilise your budget.',
+        tone: 'neutral',
+      });
+    }
 
     return actions;
   }
 
   if (monthlyPlan.savingsAllocation > 0) {
     actions.push({
-      title: 'Automate savings first',
-      detail: `Move ${monthlyPlan.savingsAllocation} each month into savings right after income arrives.`,
+      title: 'Automate savings',
+      detail: `Move ${formatValue(
+        monthlyPlan.savingsAllocation
+      )} into savings each month to keep building your buffer.`,
       tone: 'success',
     });
   }
 
-  if (monthlyPlan.debtAllocation > 0 && monthlyPlan.debtPlan.length > 0) {
-    const focusDebt = monthlyPlan.debtPlan.find((debt) => debt.isPriority);
-    if (focusDebt) {
-      actions.push({
-        title: `Target ${focusDebt.name}`,
-        detail: `Keep all minimums going, then send the extra ${monthlyPlan.debtAllocation} here every month.`,
-        tone: 'success',
-      });
-    }
+  if (monthlyPlan.debtAllocation > 0 && focusDebt) {
+    actions.push({
+      title: `Target ${focusDebt.name}`,
+      detail: `Keep all minimums going, then send the extra ${formatValue(
+        monthlyPlan.debtAllocation
+      )} here each month.`,
+      tone: 'success',
+    });
+  } else if (!focusDebt && monthlyPlan.surplus > 0) {
+    actions.push({
+      title: 'Build savings faster',
+      detail: 'With no active debt to target, direct your monthly surplus into savings and cash buffer growth.',
+      tone: 'success',
+    });
   }
 
   if (monthlyPlan.monthsSavedVsMinimums > 0) {
     actions.push({
-      title: 'Accelerated payoff is working',
-      detail: `This plan could shorten payoff by about ${monthlyPlan.monthsSavedVsMinimums} months versus minimum payments only.`,
+      title: 'Speed up payoff',
+      detail: `This plan could shorten your total debt payoff by about ${monthlyPlan.monthsSavedVsMinimums} months versus minimum payments only.`,
       tone: 'success',
     });
   }
 
-  const nonEssentialTotal = sumBy(
-    (state.budgetCategories || []).filter((category) => category.type === 'non-essential'),
-    (category) => category.amount
-  );
-
-  if (nonEssentialTotal > 0) {
+  if (monthlyPlan.interestSavedVsMinimums > 0) {
     actions.push({
-      title: 'Review flexible spending monthly',
-      detail: `You currently have ${roundMoney(
-        nonEssentialTotal
-      )} in non-essential budget categories, which is your fastest source of extra payoff money.`,
+      title: 'Reduce interest',
+      detail: `Following this plan could save about ${formatValue(
+        monthlyPlan.interestSavedVsMinimums
+      )} in interest versus minimum payments only.`,
       tone: 'neutral',
     });
   }
 
-  if (totals.priorityDebt && toNumber(totals.priorityDebt.interest) > 0) {
+  if (nonEssentialTotal > 0) {
     actions.push({
-      title: 'Avoid adding to high-interest balances',
-      detail: `Every new charge on ${totals.priorityDebt.name} slows the payoff plan.`,
+      title: 'Review flexible spending',
+      detail: `You currently have ${formatValue(
+        nonEssentialTotal
+      )} in non-essential categories, which is your quickest source of extra progress.`,
+      tone: 'neutral',
+    });
+  }
+
+  if (focusDebt && toNumber(focusDebt.interest) > 0) {
+    actions.push({
+      title: 'Avoid new borrowing on the target debt',
+      detail: `New spending on ${focusDebt.name} will slow the payoff plan and increase interest costs.`,
       tone: 'neutral',
     });
   }
@@ -870,18 +940,136 @@ const buildResultActions = ({ totals, monthlyPlan, trimPlan, state }) => {
   return actions;
 };
 
-// --- App ---
+const InsightCard = ({
+  eyebrow,
+  title,
+  description,
+  value,
+  valueClassName = 'text-xl md:text-2xl font-black text-slate-800',
+  children,
+  tone = 'default',
+  compact = false,
+}) => {
+  const toneClasses =
+    tone === 'success'
+      ? 'bg-cyan-50 border-cyan-100'
+      : tone === 'warning'
+      ? 'bg-rose-50 border-rose-100'
+      : tone === 'highlight'
+      ? 'bg-amber-50 border-amber-100'
+      : 'bg-white border-slate-100';
+
+  return (
+    <div
+      className={`rounded-2xl border min-w-0 ${toneClasses} ${
+        compact ? 'p-4' : 'p-4 md:p-5'
+      }`}
+    >
+      {eyebrow && (
+        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+          {eyebrow}
+        </p>
+      )}
+
+      {title && (
+        <p className="text-base md:text-lg font-black text-slate-800 break-words">
+          {title}
+        </p>
+      )}
+
+      {value !== undefined && value !== null && (
+        <p className={`break-words ${title ? 'mt-2' : ''} ${valueClassName}`}>
+          {value}
+        </p>
+      )}
+
+      {description && (
+        <p className="text-sm text-slate-500 mt-2 break-words">{description}</p>
+      )}
+
+      {children ? <div className={description ? 'mt-3' : ''}>{children}</div> : null}
+    </div>
+  );
+};
+
+const SectionIntro = ({
+  icon,
+  eyebrow,
+  title,
+  description,
+  iconTone = 'default',
+}) => {
+  const iconClasses =
+    iconTone === 'success'
+      ? 'bg-cyan-50 text-[#1EB1BB]'
+      : iconTone === 'warning'
+      ? 'bg-rose-50 text-rose-500'
+      : 'bg-slate-50 text-slate-500';
+
+  return (
+    <div className="flex items-start gap-3 md:gap-4 mb-6 md:mb-8 min-w-0">
+      <div
+        className={`w-12 h-12 md:w-14 md:h-14 rounded-[1rem] md:rounded-[1.25rem] flex items-center justify-center flex-shrink-0 ${iconClasses}`}
+      >
+        {icon}
+      </div>
+
+      <div className="min-w-0">
+        {eyebrow && (
+          <p className="text-slate-400 text-[11px] font-black uppercase tracking-widest mb-2">
+            {eyebrow}
+          </p>
+        )}
+        {title && (
+          <h3 className="text-xl md:text-3xl font-black text-slate-800 leading-tight break-words">
+            {title}
+          </h3>
+        )}
+        {description && (
+          <p className="text-slate-500 mt-2 break-words">{description}</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const PrintSummaryRow = ({ label, value }) => (
+  <div className="flex items-center justify-between gap-4 py-2 border-b border-slate-200">
+    <span className="text-sm font-bold text-slate-500">{label}</span>
+    <span className="text-sm font-black text-slate-900 text-right">{value}</span>
+  </div>
+);
+
+const DisclaimerCard = () => (
+  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 md:p-6 text-center max-w-3xl mx-auto">
+    <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2">
+      Important
+    </p>
+    <p className="text-sm text-slate-600 leading-relaxed">
+      This tool provides general guidance and illustrative calculations only.
+      It does not constitute financial advice. Always consider your personal
+      circumstances and, if needed, seek advice from a qualified financial
+      professional.
+    </p>
+  </div>
+);
 export default function App() {
   const [step, setStep] = useState(0);
   const [expandedDebtId, setExpandedDebtId] = useState(null);
   const [expandedBillId, setExpandedBillId] = useState(null);
+  const [expandedBudgetCategoryId, setExpandedBudgetCategoryId] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showTrimApplied, setShowTrimApplied] = useState(false);
+  const [highlightTrimUpdate, setHighlightTrimUpdate] = useState(false);
   const [preTrimBudgetSnapshot, setPreTrimBudgetSnapshot] = useState(null);
   const [payoffStrategy, setPayoffStrategy] = useState(
     PAYOFF_STRATEGIES.avalanche
   );
+  const [isPrintMode, setIsPrintMode] = useState(false);
+
+  const resultsTopRef = useRef(null);
+  const trimUpdatedRef = useRef(null);
 
   const [state, setState] = useState({
     currency: 'GBP',
@@ -902,11 +1090,16 @@ export default function App() {
 
   useEffect(() => {
     const loaded = loadSavedState();
+
     if (loaded) {
       setState((prev) => ({
         ...prev,
         ...loaded,
       }));
+
+      if (loaded?.budgetCategories?.length) {
+        setExpandedBudgetCategoryId(loaded.budgetCategories[0].id);
+      }
     }
   }, []);
 
@@ -934,6 +1127,42 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [showTrimApplied]);
 
+  useEffect(() => {
+    if (!highlightTrimUpdate) return;
+
+    const timer = setTimeout(() => {
+      setHighlightTrimUpdate(false);
+    }, 2200);
+
+    return () => clearTimeout(timer);
+  }, [highlightTrimUpdate]);
+
+  useEffect(() => {
+    if (!state.budgetCategories.length) {
+      setExpandedBudgetCategoryId(null);
+      return;
+    }
+
+    const stillExists = state.budgetCategories.some(
+      (category) => category.id === expandedBudgetCategoryId
+    );
+
+    if (!expandedBudgetCategoryId || !stillExists) {
+      setExpandedBudgetCategoryId(state.budgetCategories[0].id);
+    }
+  }, [state.budgetCategories, expandedBudgetCategoryId]);
+
+  useEffect(() => {
+    if (step !== 5) return;
+
+    requestAnimationFrame(() => {
+      resultsTopRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  }, [step]);
+
   const getCurrencySymbol = () =>
     CURRENCIES.find((currency) => currency.code === state.currency)?.symbol || '£';
 
@@ -946,6 +1175,20 @@ export default function App() {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     })}`;
+  };
+
+  const exportResultsAsPdf = () => {
+    setIsPrintMode(true);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+
+        setTimeout(() => {
+          setIsPrintMode(false);
+        }, 300);
+      });
+    });
   };
 
   const totalBudgetSpending = useMemo(
@@ -1012,6 +1255,7 @@ export default function App() {
 
   const incomeMissing = step === 2 && !isFilled(state.income);
   const budgetMissing = step === 2 && !hasBudgetCategoryAmount;
+
   const getDebtStatus = (debt) => {
     const hasName = Boolean(debt.name && debt.name.trim());
     const hasBalance = isFilled(debt.balance);
@@ -1162,6 +1406,7 @@ export default function App() {
     );
 
     const priorityDebt = debtsSortedByApr[0] || null;
+
     const payoffEstimate = priorityDebt
       ? calculateDebtPayoff(
           priorityDebt.balance,
@@ -1187,8 +1432,11 @@ export default function App() {
       color: 'text-emerald-500',
       bg: 'bg-emerald-50',
       border: 'border-emerald-100',
-      heading: 'Meaningful breathing room',
+      heading: 'You have room to make progress',
       label: 'Monthly Surplus',
+      tone: 'surplus',
+      summary: 'You have enough monthly space to build savings and accelerate debt payoff.',
+      shortLabel: 'Progress room',
     };
 
     if (remaining < -300) {
@@ -1197,8 +1445,12 @@ export default function App() {
         color: 'text-red-500',
         bg: 'bg-red-50',
         border: 'border-red-100',
-        heading: 'Under serious pressure',
+        heading: 'Your budget is under heavy pressure',
         label: 'Monthly Deficit',
+        tone: 'deficit',
+        summary:
+          'Your listed monthly costs are significantly higher than your income, so stabilising cash flow should come before faster debt payoff.',
+        shortLabel: 'Heavy pressure',
       };
     } else if (remaining < 0) {
       tier = {
@@ -1206,8 +1458,12 @@ export default function App() {
         color: 'text-rose-500',
         bg: 'bg-rose-50',
         border: 'border-rose-100',
-        heading: 'Needs immediate attention',
+        heading: 'You are slightly overspending',
         label: 'Monthly Deficit',
+        tone: 'deficit',
+        summary:
+          'This looks fixable, but you need to remove the monthly shortfall before putting extra money toward debt.',
+        shortLabel: 'Overspending',
       };
     } else if (remaining <= 100) {
       tier = {
@@ -1215,8 +1471,12 @@ export default function App() {
         color: 'text-amber-500',
         bg: 'bg-amber-50',
         border: 'border-amber-100',
-        heading: 'Things are very tight',
+        heading: 'You are close to break-even',
         label: 'Monthly Margin',
+        tone: 'tight',
+        summary:
+          'You are not far from stability, but your plan still has very little room for surprises.',
+        shortLabel: 'Very tight',
       };
     } else if (remaining <= 300) {
       tier = {
@@ -1224,8 +1484,12 @@ export default function App() {
         color: 'text-teal-500',
         bg: 'bg-teal-50',
         border: 'border-teal-100',
-        heading: 'Some room to work with',
+        heading: 'You have a small monthly cushion',
         label: 'Monthly Surplus',
+        tone: 'surplus',
+        summary:
+          'You have some room to build momentum, but consistent follow-through still matters.',
+        shortLabel: 'Small cushion',
       };
     }
 
@@ -1271,9 +1535,35 @@ export default function App() {
   );
 
   const resultActions = useMemo(
-    () => buildResultActions({ totals, monthlyPlan, trimPlan, state }),
+    () => buildResultActions({ totals, monthlyPlan, trimPlan, state, formatValue }),
     [totals, monthlyPlan, trimPlan, state]
   );
+
+  const openBudgetCategory = (id) => {
+    setExpandedBudgetCategoryId(id);
+
+    setState((prev) => {
+      const index = prev.budgetCategories.findIndex((category) => category.id === id);
+      if (index <= 0) return prev;
+
+      const selected = prev.budgetCategories[index];
+      const remaining = prev.budgetCategories.filter((category) => category.id !== id);
+
+      return {
+        ...prev,
+        budgetCategories: [selected, ...remaining],
+      };
+    });
+  };
+
+  const toggleBudgetCategory = (id) => {
+    if (expandedBudgetCategoryId === id) {
+      setExpandedBudgetCategoryId(null);
+      return;
+    }
+
+    openBudgetCategory(id);
+  };
 
   const applyTrimPlan = () => {
     if (!trimPlan.suggestions.length) return;
@@ -1300,6 +1590,16 @@ export default function App() {
     }));
 
     setShowTrimApplied(true);
+    setHighlightTrimUpdate(true);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        trimUpdatedRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      });
+    });
   };
 
   const undoAppliedTrimPlan = () => {
@@ -1312,6 +1612,7 @@ export default function App() {
 
     setPreTrimBudgetSnapshot(null);
     setShowTrimApplied(false);
+    setHighlightTrimUpdate(false);
   };
 
   const nextStep = () => {
@@ -1341,18 +1642,24 @@ export default function App() {
     setPayoffStrategy(PAYOFF_STRATEGIES.avalanche);
     setExpandedDebtId(null);
     setExpandedBillId(null);
+    setExpandedBudgetCategoryId(null);
     setLastDeleted(null);
     setShowResetConfirm(false);
     setShowTrimApplied(false);
+    setHighlightTrimUpdate(false);
     setPreTrimBudgetSnapshot(null);
     setStep(0);
   };
 
   const addBudgetCategory = (name = '', type = 'essential') => {
+    const newCategory = createBudgetCategory(name, type);
+
     setState((prev) => ({
       ...prev,
-      budgetCategories: [createBudgetCategory(name, type), ...prev.budgetCategories],
+      budgetCategories: [newCategory, ...prev.budgetCategories],
     }));
+
+    setExpandedBudgetCategoryId(newCategory.id);
   };
 
   const updateBudgetCategory = (id, key, value) => {
@@ -1365,12 +1672,27 @@ export default function App() {
   };
 
   const removeBudgetCategory = (id) => {
+    const deletedItem = state.budgetCategories.find((category) => category.id === id);
+    const deletedIndex = state.budgetCategories.findIndex(
+      (category) => category.id === id
+    );
+
+    if (!deletedItem) return;
+
+    setLastDeleted({
+      type: 'budget',
+      item: deletedItem,
+      index: deletedIndex,
+    });
+
     setState((prev) => ({
       ...prev,
       budgetCategories: prev.budgetCategories.filter(
         (category) => category.id !== id
       ),
     }));
+
+    setExpandedBudgetCategoryId((prev) => (prev === id ? null : prev));
   };
 
   const addDebt = (name = '') => {
@@ -1463,6 +1785,21 @@ export default function App() {
 
   const undoDelete = () => {
     if (!lastDeleted) return;
+
+    if (lastDeleted.type === 'budget') {
+      setState((prev) => {
+        const nextBudgetCategories = [...prev.budgetCategories];
+        const insertAt = Math.min(
+          Math.max(lastDeleted.index ?? 0, 0),
+          nextBudgetCategories.length
+        );
+        nextBudgetCategories.splice(insertAt, 0, lastDeleted.item);
+
+        return { ...prev, budgetCategories: nextBudgetCategories };
+      });
+
+      setExpandedBudgetCategoryId(lastDeleted.item.id);
+    }
 
     if (lastDeleted.type === 'debt') {
       setState((prev) => {
@@ -1578,7 +1915,6 @@ export default function App() {
       </div>
     </div>
   );
-
   const BasicsView = () => {
     const savingsCurrentInvalid = isNegative(state.savings?.current);
     const savingsTargetInvalid = isNegative(state.savings?.emergencyTarget);
@@ -1682,99 +2018,219 @@ export default function App() {
               ))}
             </div>
 
-            <div className="space-y-3">
-              {state.budgetCategories.map((category) => {
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+              <div className="bg-slate-50 rounded-2xl border border-slate-100 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                  Categories
+                </p>
+                <p className="text-lg font-black text-slate-800">
+                  {state.budgetCategories.length}
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl border border-slate-100 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                  Total Budget
+                </p>
+                <p className="text-lg font-black text-slate-800">
+                  {formatValue(totalBudgetSpending)}
+                </p>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl border border-slate-100 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                  Flexible Spend
+                </p>
+                <p className="text-lg font-black text-slate-800">
+                  {formatValue(nonEssentialBudgetTotal)}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {state.budgetCategories.map((category, index) => {
                 const amountInvalid = isNegative(category.amount);
                 const nameInvalid = !String(category.name || '').trim();
+                const isOpen = expandedBudgetCategoryId === category.id;
+                const hasAmount = isFilled(category.amount);
 
                 return (
                   <div
                     key={category.id}
-                    className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.7fr)_minmax(0,140px)_56px] gap-3 items-start min-w-0"
+                    className={`rounded-[1.5rem] border transition-all overflow-hidden ${
+                      isOpen
+                        ? 'border-[#1EB1BB] bg-white shadow-md'
+                        : 'border-slate-100 bg-white hover:border-slate-200'
+                    }`}
                   >
-                    <div className="min-w-0">
-                      <input
-                        value={category.name}
-                        onChange={(e) =>
-                          updateBudgetCategory(category.id, 'name', e.target.value)
-                        }
-                        placeholder="Category name"
-                        className={`w-full min-w-0 p-4 rounded-xl text-sm font-black focus:outline-none ${
-                          nameInvalid
-                            ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
-                            : 'bg-slate-50 text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB]'
-                        }`}
-                      />
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="relative">
-                        <span
-                          className={`absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold ${
-                            amountInvalid ? 'text-red-300' : 'text-slate-300'
-                          }`}
-                        >
-                          {getCurrencySymbol()}
-                        </span>
-
-                        <input
-                          type="number"
-                          min="0"
-                          value={category.amount}
-                          onChange={(e) =>
-                            updateBudgetCategory(category.id, 'amount', e.target.value)
-                          }
-                          placeholder="0"
-                          className={`w-full min-w-0 pl-9 pr-4 py-4 rounded-xl text-sm font-black text-right focus:outline-none ${
-                            amountInvalid
-                              ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
-                              : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
-                          }`}
-                        />
-                      </div>
-                    </div>
-
                     <button
                       type="button"
-                      onClick={() => removeBudgetCategory(category.id)}
-                      className="h-[52px] w-[52px] rounded-xl bg-slate-50 text-slate-300 hover:text-red-500 transition-colors flex items-center justify-center sm:justify-self-end"
+                      onClick={() => toggleBudgetCategory(category.id)}
+                      className="w-full text-left p-5"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <div className="flex items-center justify-between gap-4 min-w-0">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                            <p className="text-lg font-black text-[#1B2B4B] truncate min-w-0">
+                              {category.name || 'New Category'}
+                            </p>
+
+                            <span
+                              className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                                category.type === 'essential'
+                                  ? 'bg-[#1B2B4B] text-white border-[#1B2B4B]'
+                                  : 'bg-cyan-50 text-[#1EB1BB] border-cyan-100'
+                              }`}
+                            >
+                              {category.type === 'essential'
+                                ? 'Essential'
+                                : 'Non-essential'}
+                            </span>
+
+                            {!hasAmount && (
+                              <span className="inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border bg-amber-50 text-amber-600 border-amber-100">
+                                Incomplete
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-4 mt-3 text-sm text-slate-500 flex-wrap">
+                            <span>
+                              Amount:{' '}
+                              <span className="font-black text-slate-700">
+                                {hasAmount
+                                  ? formatValue(category.amount)
+                                  : `${getCurrencySymbol()}0`}
+                              </span>
+                            </span>
+                            <span>#{index + 1}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeBudgetCategory(category.id);
+                            }}
+                            className="h-10 w-10 rounded-xl bg-slate-50 text-slate-300 hover:text-red-500 transition-colors flex items-center justify-center"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+
+                          <div
+                            className={`w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 transition-transform ${
+                              isOpen ? 'rotate-90' : ''
+                            }`}
+                          >
+                            <ChevronRight className="w-5 h-5" />
+                          </div>
+                        </div>
+                      </div>
                     </button>
 
-                    <div className="sm:col-span-3 flex flex-wrap gap-2 -mt-1">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateBudgetCategory(category.id, 'type', 'essential')
-                        }
-                        className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all ${
-                          category.type === 'essential'
-                            ? 'bg-[#1B2B4B] text-white border-[#1B2B4B]'
-                            : 'bg-white text-slate-500 border-slate-200'
-                        }`}
-                      >
-                        Essential
-                      </button>
+                    {isOpen && (
+                      <div className="px-5 pb-5 border-t border-slate-100 animate-in">
+                        <div className="pt-5 space-y-4">
+                          <div className="min-w-0">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                              Category Name
+                            </label>
+                            <input
+                              value={category.name}
+                              onChange={(e) =>
+                                updateBudgetCategory(category.id, 'name', e.target.value)
+                              }
+                              placeholder="Category name"
+                              className={`w-full min-w-0 p-4 rounded-xl text-sm font-black focus:outline-none ${
+                                nameInvalid
+                                  ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                                  : 'bg-slate-50 text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB]'
+                              }`}
+                            />
+                          </div>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateBudgetCategory(
-                            category.id,
-                            'type',
-                            'non-essential'
-                          )
-                        }
-                        className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all ${
-                          category.type === 'non-essential'
-                            ? 'bg-[#1EB1BB] text-white border-[#1EB1BB]'
-                            : 'bg-white text-slate-500 border-slate-200'
-                        }`}
-                      >
-                        Non-essential
-                      </button>
-                    </div>
+                          <div className="min-w-0">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                              Monthly Amount
+                            </label>
+                            <div className="relative">
+                              <span
+                                className={`absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold ${
+                                  amountInvalid ? 'text-red-300' : 'text-slate-300'
+                                }`}
+                              >
+                                {getCurrencySymbol()}
+                              </span>
+
+                              <input
+                                type="number"
+                                min="0"
+                                value={category.amount}
+                                onChange={(e) =>
+                                  updateBudgetCategory(category.id, 'amount', e.target.value)
+                                }
+                                placeholder="0"
+                                className={`w-full min-w-0 pl-9 pr-4 py-4 rounded-xl text-sm font-black text-right focus:outline-none ${
+                                  amountInvalid
+                                    ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                                    : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                                }`}
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3">
+                              Category Type
+                            </label>
+
+                            <div className="flex flex-wrap gap-3">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateBudgetCategory(category.id, 'type', 'essential')
+                                }
+                                className={`px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-wider border transition-all ${
+                                  category.type === 'essential'
+                                    ? 'bg-[#1B2B4B] text-white border-[#1B2B4B]'
+                                    : 'bg-white text-slate-500 border-slate-200'
+                                }`}
+                              >
+                                Essential
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateBudgetCategory(
+                                    category.id,
+                                    'type',
+                                    'non-essential'
+                                  )
+                                }
+                                className={`px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-wider border transition-all ${
+                                  category.type === 'non-essential'
+                                    ? 'bg-[#1EB1BB] text-white border-[#1EB1BB]'
+                                    : 'bg-white text-slate-500 border-slate-200'
+                                }`}
+                              >
+                                Non-essential
+                              </button>
+                            </div>
+                          </div>
+
+                          {(nameInvalid || amountInvalid) && (
+                            <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-bold text-red-600">
+                              {nameInvalid
+                                ? 'Category name is required.'
+                                : 'Amount cannot be negative.'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1791,35 +2247,6 @@ export default function App() {
                 Budget categories must have a name and cannot have negative amounts.
               </p>
             )}
-
-            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex items-center justify-between gap-3 min-w-0">
-                <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 min-w-0">
-                  Total Budget
-                </span>
-                <span className="text-lg font-black text-slate-800 shrink-0">
-                  {formatValue(totalBudgetSpending)}
-                </span>
-              </div>
-
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex items-center justify-between gap-3 min-w-0">
-                <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 min-w-0">
-                  Essential
-                </span>
-                <span className="text-lg font-black text-slate-800 shrink-0">
-                  {formatValue(essentialBudgetTotal)}
-                </span>
-              </div>
-
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex items-center justify-between gap-3 min-w-0">
-                <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 min-w-0">
-                  Flexible
-                </span>
-                <span className="text-lg font-black text-slate-800 shrink-0">
-                  {formatValue(nonEssentialBudgetTotal)}
-                </span>
-              </div>
-            </div>
           </section>
         </div>
 
@@ -2026,6 +2453,7 @@ export default function App() {
           </div>
         )}
       </div>
+
       <div className="space-y-4">
         {state.debts.length === 0 ? (
           <div className="bg-slate-50 rounded-[2.5rem] p-16 text-center border-2 border-dashed border-slate-200 text-slate-400 font-bold italic">
@@ -2430,7 +2858,6 @@ export default function App() {
       </div>
     </div>
   );
-
   const ResultsView = () => {
     const savingsProgress =
       monthlyPlan.effectiveEmergencyTarget > 0
@@ -2448,6 +2875,7 @@ export default function App() {
       .slice(0, 4);
 
     const firstPayoffMoment = monthlyPlan.debtTimeline?.payoffMoments?.[0] || null;
+
     const comparisonInterestDelta =
       comparisonPlan?.debtTimeline?.valid && monthlyPlan?.debtTimeline?.valid
         ? roundMoney(
@@ -2456,35 +2884,321 @@ export default function App() {
           )
         : 0;
 
+    const nextFocusDebt =
+      monthlyPlan.debtPlan?.find((debt) => debt.isPriority) || totals.priorityDebt || null;
+
+    const postTrimBalance = roundMoney(
+      toNumber(totals.remaining) + toNumber(trimPlan.totalSuggested)
+    );
+
+    const trimAppliedDelta = preTrimBudgetSnapshot
+      ? roundMoney(
+          sumBy(preTrimBudgetSnapshot, (category) => category.amount) -
+            sumBy(state.budgetCategories, (category) => category.amount)
+        )
+      : 0;
+
+    const currentBudgetTotal = roundMoney(
+      sumBy(state.budgetCategories, (category) => category.amount)
+    );
+
+    const previousBudgetTotal = preTrimBudgetSnapshot
+      ? roundMoney(sumBy(preTrimBudgetSnapshot, (category) => category.amount))
+      : currentBudgetTotal;
+
+    const balanceAfterAppliedTrim = preTrimBudgetSnapshot
+      ? roundMoney(toNumber(totals.remaining) + trimAppliedDelta)
+      : null;
+
+    const trimWasApplied = Boolean(preTrimBudgetSnapshot && trimAppliedDelta > 0);
+
+    const deficitResolvedByTrim = monthlyPlan.type === 'deficit' && trimPlan.covered;
+    const canShowDebtAcceleration =
+      monthlyPlan.type === 'surplus' || deficitResolvedByTrim;
+
+    const hasActiveDebt = state.debts.some((debt) => toNumber(debt.balance) > 0);
+    const hasFlexibleSpending = totals.nonEssentialBudgetTotal > 0;
+    const hasSavingsTarget = toNumber(monthlyPlan.effectiveEmergencyTarget) > 0;
+
+    const strategyBadgeLabel =
+      payoffStrategy === PAYOFF_STRATEGIES.avalanche
+        ? 'Avalanche active'
+        : 'Snowball active';
+
+    const heroTitle =
+      monthlyPlan.type === 'deficit'
+        ? `You’re currently ${formatValue(Math.abs(monthlyPlan.surplus))} short each month`
+        : `You have ${formatValue(monthlyPlan.surplus)} left each month`;
+
+    const heroSubtext =
+      monthlyPlan.type === 'deficit'
+        ? 'Bring your monthly balance back to zero first.'
+        : 'Put this monthly surplus to work automatically.';
+
+    const generatedDate = new Date().toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const printPrimaryAction =
+      monthlyPlan.type === 'deficit'
+        ? trimPlan.quickWin
+          ? `Reduce ${trimPlan.quickWin.name} by ${formatValue(
+              trimPlan.quickWin.suggestedTrim
+            )}`
+          : 'Reduce spending until monthly balance reaches zero'
+        : nextFocusDebt
+        ? `Send extra monthly cash to ${nextFocusDebt.name}`
+        : 'Build savings with your monthly surplus';
+
     return (
-      <div className="space-y-10 max-w-5xl mx-auto pb-16 animate-in w-full">
-        <section className="bg-[#1B2B4B] text-white p-8 md:p-20 rounded-[2.5rem] md:rounded-[4rem] shadow-2xl relative overflow-hidden">
+      <div
+        ref={resultsTopRef}
+        className="space-y-6 md:space-y-10 max-w-5xl mx-auto pb-12 md:pb-16 animate-in w-full"
+      >
+        <div className="print-summary hidden print:block bg-white text-slate-900">
+          <div className="max-w-3xl mx-auto px-6 py-8">
+            <div className="flex items-center justify-between gap-4 mb-8">
+              <div>
+                <img
+                  src="/vayrity-logo.png"
+                  alt="Vayrity logo"
+                  className="h-10 w-auto object-contain mb-4"
+                />
+                <h1 className="text-3xl font-black text-[#1B2B4B]">Vayrity Plan Summary</h1>
+                <p className="text-sm text-slate-500 mt-2">
+                  Generated on {generatedDate}
+                </p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">
+                  Monthly Position
+                </p>
+                <p
+                  className={`text-3xl font-black ${
+                    totals.remaining < 0 ? 'text-rose-600' : 'text-emerald-600'
+                  }`}
+                >
+                  {formatValue(totals.remaining)}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-8">
+              <section>
+                <h2 className="text-lg font-black text-slate-900 mb-4">Financial Snapshot</h2>
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <PrintSummaryRow label="Monthly position" value={formatValue(totals.remaining)} />
+                  <PrintSummaryRow label="Total debt" value={formatValue(totals.totalDebtBalance)} />
+                  <PrintSummaryRow
+                    label="Current savings"
+                    value={formatValue(monthlyPlan.currentSavings)}
+                  />
+                  <PrintSummaryRow
+                    label="Emergency target"
+                    value={formatValue(monthlyPlan.effectiveEmergencyTarget)}
+                  />
+                  <PrintSummaryRow
+                    label="Budget spending"
+                    value={formatValue(totals.budgetSpending)}
+                  />
+                  <PrintSummaryRow
+                    label="Flexible spending"
+                    value={formatValue(totals.nonEssentialBudgetTotal)}
+                  />
+                </div>
+              </section>
+
+              <section>
+                <h2 className="text-lg font-black text-slate-900 mb-4">Primary Action</h2>
+                <div className="rounded-2xl border border-slate-200 p-5">
+                  <p className="text-base font-black text-slate-900">{printPrimaryAction}</p>
+                  <p className="text-sm text-slate-600 mt-2">{monthlyPlan.explanation}</p>
+                </div>
+              </section>
+
+              <section>
+                <h2 className="text-lg font-black text-slate-900 mb-4">Monthly Plan</h2>
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  {monthlyPlan.type === 'deficit' ? (
+                    <>
+                      <PrintSummaryRow
+                        label="Current monthly gap"
+                        value={formatValue(Math.abs(monthlyPlan.surplus))}
+                      />
+                      <PrintSummaryRow
+                        label="Suggested trim total"
+                        value={formatValue(trimPlan.totalSuggested)}
+                      />
+                      <PrintSummaryRow
+                        label="Balance after suggested trims"
+                        value={formatValue(
+                          roundMoney(toNumber(totals.remaining) + toNumber(trimPlan.totalSuggested))
+                        )}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <PrintSummaryRow
+                        label="Monthly to savings"
+                        value={formatValue(monthlyPlan.savingsAllocation)}
+                      />
+                      <PrintSummaryRow
+                        label="Monthly extra to debt"
+                        value={formatValue(monthlyPlan.debtAllocation)}
+                      />
+                      <PrintSummaryRow
+                        label="Debt-free estimate"
+                        value={
+                          monthlyPlan.debtTimeline?.valid
+                            ? monthlyPlan.debtTimeline.months === 0
+                              ? 'No active debt'
+                              : formatMonthsLabel(monthlyPlan.debtTimeline.months)
+                            : 'Needs clearer debt details'
+                        }
+                      />
+                      <PrintSummaryRow
+                        label="Emergency fund estimate"
+                        value={
+                          monthlyPlan.emergencyFundMonths === 0
+                            ? 'Already funded'
+                            : monthlyPlan.emergencyFundMonths
+                            ? formatMonthsLabel(monthlyPlan.emergencyFundMonths)
+                            : 'In progress'
+                        }
+                      />
+                    </>
+                  )}
+                </div>
+              </section>
+
+              {nextFocusDebt && (
+                <section>
+                  <h2 className="text-lg font-black text-slate-900 mb-4">Priority Debt</h2>
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <PrintSummaryRow label="Debt" value={nextFocusDebt.name} />
+                    <PrintSummaryRow
+                      label="Balance"
+                      value={formatValue(nextFocusDebt.balance)}
+                    />
+                    <PrintSummaryRow
+                      label="APR"
+                      value={`${toNumber(nextFocusDebt.interest)}%`}
+                    />
+                    <PrintSummaryRow
+                      label="Minimum payment"
+                      value={`${formatValue(nextFocusDebt.minPayment || 0)}/month`}
+                    />
+                  </div>
+                </section>
+              )}
+
+              {monthlyPlan.actions?.length > 0 && (
+                <section>
+                  <h2 className="text-lg font-black text-slate-900 mb-4">Action Checklist</h2>
+                  <div className="rounded-2xl border border-slate-200 p-5">
+                    <ul className="space-y-2 text-sm text-slate-700">
+                      {monthlyPlan.actions.slice(0, 5).map((action, index) => (
+                        <li key={`${action}-${index}`}>• {action}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+              )}
+
+              <section>
+                <h2 className="text-lg font-black text-slate-900 mb-4">Recommendation</h2>
+                <div className="rounded-2xl border border-slate-200 p-5">
+                  <p className="text-sm text-slate-700 leading-relaxed">
+                    {monthlyPlan.type === 'deficit'
+                      ? trimPlan.quickWin
+                        ? `Best move: reduce ${trimPlan.quickWin.name} by ${formatValue(
+                            trimPlan.quickWin.suggestedTrim
+                          )} to get back to zero.`
+                        : 'Best move: reduce spending until your monthly balance reaches zero or above.'
+                      : nextFocusDebt
+                      ? `Best move: follow the plan consistently and protect the extra payment going to ${nextFocusDebt.name}.`
+                      : 'Best move: keep building savings consistently with your monthly surplus.'}
+                  </p>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        <section className="bg-[#1B2B4B] text-white p-6 md:p-20 rounded-[2rem] md:rounded-[4rem] shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-80 h-80 bg-white/5 rounded-full -mr-20 -mt-20 blur-[100px]"></div>
 
-          <div className="relative z-10 flex flex-col md:flex-row items-center gap-12 min-w-0">
+          <div className="relative z-10 flex flex-col md:flex-row items-center gap-8 md:gap-12 min-w-0">
             <div className="flex-1 space-y-6 text-center md:text-left min-w-0">
+              <div className="flex flex-wrap items-center gap-3 justify-center md:justify-start">
+                <span
+                  className={`inline-flex items-center px-4 py-2 rounded-full text-[11px] font-black uppercase tracking-[0.22em] border ${
+                    monthlyPlan.type === 'deficit'
+                      ? 'bg-white/10 text-rose-300 border-white/10'
+                      : 'bg-white/10 text-[#7FE7ED] border-white/10'
+                  }`}
+                >
+                  {monthlyPlan.type === 'deficit'
+                    ? 'Immediate priority'
+                    : 'Monthly progress plan'}
+                </span>
+
+                <span className="inline-flex items-center px-4 py-2 rounded-full text-[11px] font-black uppercase tracking-[0.22em] border bg-white/5 text-white/70 border-white/10">
+                  {totals.tier.shortLabel}
+                </span>
+              </div>
+
               <h2 className="text-3xl md:text-5xl font-black leading-tight break-words">
-                {totals.tier.heading}
+                {heroTitle}
               </h2>
 
-              <p className="text-white/70 text-lg md:text-xl font-medium max-w-xl">
-                Based on your figures, you have {formatValue(Math.abs(totals.remaining))}
-                {totals.remaining < 0
-                  ? ' missing each month after your listed costs.'
-                  : ' left each month after your listed costs.'}
-              </p>
-
-              {monthlyPlan.type === 'surplus' && (
-                <p className="text-sm md:text-base text-white/70 max-w-2xl">
-                  {monthlyPlan.actionHeadline}
+              <div className="space-y-3 max-w-2xl">
+                <p className="text-white/75 text-lg md:text-xl font-medium">
+                  {heroSubtext}
                 </p>
-              )}
+                <p className="text-white/55 text-sm md:text-base">
+                  {totals.tier.summary}
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 justify-center md:justify-start">
+                {monthlyPlan.type === 'deficit' && trimPlan.suggestions.length > 0 && (
+                  <button
+                    onClick={applyTrimPlan}
+                    className="bg-[#1EB1BB] text-white px-6 py-4 rounded-2xl font-black text-sm uppercase tracking-wider hover:brightness-105 active:scale-95 transition-all shadow-xl ring-4 ring-cyan-200/20"
+                  >
+                    Fix my budget automatically
+                  </button>
+                )}
+
+                {monthlyPlan.type === 'deficit' && (
+                  <button
+                    onClick={() => setStep(2)}
+                    className="bg-white/10 text-white px-6 py-4 rounded-2xl font-black text-sm uppercase tracking-wider border border-white/10 hover:bg-white/15 transition-all"
+                  >
+                    Review my figures
+                  </button>
+                )}
+
+                <button
+                  onClick={exportResultsAsPdf}
+                  className="bg-white text-[#1B2B4B] px-6 py-4 rounded-2xl font-black text-sm uppercase tracking-wider hover:bg-slate-100 transition-all shadow-lg"
+                >
+                  Export PDF
+                </button>
+              </div>
             </div>
 
             <div className="w-full md:w-auto max-w-full">
-              <div className="bg-white/10 backdrop-blur-xl p-8 md:p-12 rounded-[2rem] border border-white/10 w-full md:min-w-[280px] text-center transform hover:scale-105 transition-transform duration-300 max-w-full">
-                <p className="text-white/40 text-[11px] font-black uppercase tracking-widest mb-3">
+              <div className="bg-white/10 backdrop-blur-xl p-6 md:p-12 rounded-[1.5rem] md:rounded-[2rem] border border-white/10 w-full md:min-w-[280px] text-center max-w-full">
+                <p className="text-white/40 text-[11px] font-black uppercase tracking-widest mb-2">
                   {totals.tier.label}
+                </p>
+                <p className="text-white/70 text-xs font-bold uppercase tracking-[0.25em] mb-3">
+                  {totals.tier.shortLabel}
                 </p>
                 <p
                   className={`text-4xl md:text-6xl font-black break-words ${
@@ -2498,686 +3212,787 @@ export default function App() {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
-          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm text-center min-w-0">
-            <div className="flex justify-center mb-4 text-slate-300">
-              <Wallet className="w-8 h-8" />
-            </div>
-            <p className="text-slate-400 text-[11px] font-black uppercase tracking-wider mb-2">
-              Total Debt Balance
-            </p>
-            <p className="text-3xl font-black text-slate-800 break-words">
-              {formatValue(totals.totalDebtBalance)}
-            </p>
-          </div>
-
-          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm text-center min-w-0">
-            <div className="flex justify-center mb-4 text-slate-300">
-              <Wallet className="w-8 h-8" />
-            </div>
-            <p className="text-slate-400 text-[11px] font-black uppercase tracking-wider mb-2">
-              Budget Spending
-            </p>
-            <p className="text-3xl font-black text-slate-800 break-words">
-              {formatValue(totals.budgetSpending)}
-            </p>
-          </div>
-
-          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm text-center min-w-0">
-            <div className="flex justify-center mb-4 text-slate-300">
-              <PiggyBank className="w-8 h-8" />
-            </div>
-            <p className="text-slate-400 text-[11px] font-black uppercase tracking-wider mb-2">
-              Current Savings
-            </p>
-            <p className="text-3xl font-black text-slate-800 break-words">
-              {formatValue(state.savings?.current || 0)}
-            </p>
-          </div>
-
-          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm text-center min-w-0">
-            <div className="flex justify-center mb-4 text-slate-300">
-              <Target className="w-8 h-8" />
-            </div>
-            <p className="text-slate-400 text-[11px] font-black uppercase tracking-wider mb-2">
-              Emergency Target
-            </p>
-            <p className="text-3xl font-black text-slate-800 break-words">
-              {formatValue(monthlyPlan.effectiveEmergencyTarget || 0)}
-            </p>
-          </div>
-        </div>
-
-        {topBudgetCategories.length > 0 && (
-          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-            <h3 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-              <Info className="w-4 h-4 shrink-0" /> Budget Breakdown
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {topBudgetCategories.map((category) => (
-                <div
-                  key={category.id}
-                  className="bg-slate-50 rounded-2xl p-5 border border-slate-100 flex items-center justify-between gap-4 min-w-0"
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+          <div
+            className={`p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border shadow-sm min-w-0 ${
+              monthlyPlan.type === 'deficit'
+                ? 'bg-rose-50 border-rose-100'
+                : 'bg-cyan-50 border-cyan-100'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p
+                  className={`text-[11px] font-black uppercase tracking-wider mb-2 ${
+                    monthlyPlan.type === 'deficit' ? 'text-rose-500' : 'text-[#1EB1BB]'
+                  }`}
                 >
-                  <div className="min-w-0">
-                    <p className="font-black text-slate-800 break-words">
-                      {category.name}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      {category.type === 'essential'
-                        ? 'Essential spending'
-                        : 'Flexible spending'}
-                    </p>
-                  </div>
+                  Monthly Position
+                </p>
+                <p className="text-3xl font-black text-slate-800 break-words">
+                  {formatValue(totals.remaining)}
+                </p>
+                <p className="text-sm text-slate-600 mt-2">
+                  {monthlyPlan.type === 'deficit'
+                    ? 'This is the gap to close first.'
+                    : 'This is the surplus you can put to work.'}
+                </p>
+              </div>
 
-                  <p className="text-xl font-black text-slate-800 shrink-0">
-                    {formatValue(category.amount)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-          <div className="flex items-start justify-between gap-4 min-w-0">
-            <div className="space-y-2 min-w-0">
-              <p className="text-slate-400 text-[11px] font-black uppercase tracking-wider">
-                Priority Focus
-              </p>
-              <p className="text-xl font-black text-slate-800 break-words">
-                {totals.priorityDebt ? totals.priorityDebt.name : 'No debt added'}
-              </p>
-              <p className="text-sm text-slate-600 break-words">
-                Balance:{' '}
-                {totals.priorityDebt
-                  ? formatValue(totals.priorityDebt.balance)
-                  : formatValue(0)}
-              </p>
-              <p className="text-sm text-slate-600 break-words">
-                Minimum payment:{' '}
-                {totals.priorityDebt
-                  ? `${formatValue(totals.priorityDebt.minPayment)}/month`
-                  : `${formatValue(0)}/month`}
-              </p>
-              <p className="text-xs text-[#1EB1BB] font-bold break-words">
-                {payoffStrategy === PAYOFF_STRATEGIES.avalanche
-                  ? `Highest interest focus: ${totals.priorityDebt?.interest || 0}% APR`
-                  : `Smallest balance focus within your debt strategy`}
-              </p>
-            </div>
-
-            <div className="text-right shrink-0">
-              <div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center text-[#1EB1BB]">
-                <TrendingUp className="w-6 h-6" />
+              <div
+                className={`shrink-0 ${
+                  monthlyPlan.type === 'deficit' ? 'text-rose-400' : 'text-[#1EB1BB]'
+                }`}
+              >
+                {monthlyPlan.type === 'deficit' ? (
+                  <AlertCircle className="w-8 h-8" />
+                ) : (
+                  <CheckCircle2 className="w-8 h-8" />
+                )}
               </div>
             </div>
           </div>
 
-          <p className="text-xs text-slate-400 mt-4">
-            This card highlights the debt your current strategy is most likely to
-            target first.
-          </p>
-        </div>
+          <div className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm min-w-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-slate-400 text-[11px] font-black uppercase tracking-wider mb-2">
+                  Total Debt
+                </p>
+                <p className="text-3xl font-black text-slate-800 break-words">
+                  {formatValue(totals.totalDebtBalance)}
+                </p>
+                <p className="text-sm text-slate-600 mt-2">
+                  {nextFocusDebt
+                    ? `Current focus: ${nextFocusDebt.name}`
+                    : 'Add debts to build a payoff plan.'}
+                </p>
+              </div>
 
-        <section className="bg-white p-8 md:p-10 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-          <div className="flex items-start gap-4 mb-8 min-w-0">
-            <div className="w-14 h-14 rounded-[1.25rem] bg-cyan-50 text-[#1EB1BB] flex items-center justify-center flex-shrink-0">
-              <Target className="w-7 h-7" />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-slate-400 text-[11px] font-black uppercase tracking-widest mb-2">
-                Your Monthly Plan
-              </p>
-              <h3 className="text-2xl md:text-3xl font-black text-slate-800 leading-tight break-words">
-                Based on your current numbers, this is how to move forward.
-              </h3>
-              <p className="text-slate-500 mt-2 break-words">
-                {monthlyPlan.type === 'deficit'
-                  ? `You’re currently ${formatValue(Math.abs(monthlyPlan.surplus))} short each month.`
-                  : `You have ${formatValue(monthlyPlan.surplus)} available each month.`}
-              </p>
+              <div className="text-slate-300 shrink-0">
+                <Wallet className="w-8 h-8" />
+              </div>
             </div>
           </div>
 
-          {monthlyPlan.type === 'deficit' ? (
-            <div className="space-y-6">
-              <div className="bg-rose-50 border border-rose-100 rounded-[2rem] p-6 md:p-8">
-                <p className="text-xl font-black text-slate-800 mb-3">
-                  Focus first on stabilising your monthly cash flow.
+          <div className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 shadow-sm min-w-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-slate-400 text-[11px] font-black uppercase tracking-wider mb-2">
+                  Savings Progress
                 </p>
-                <p className="text-slate-700 leading-relaxed">
-                  Your listed costs are currently higher than your income. Before
-                  adding extra debt payments, aim to reduce spending, review bills,
-                  or increase income where possible.
+                <p className="text-3xl font-black text-slate-800 break-words">
+                  {formatValue(monthlyPlan.currentSavings)}
                 </p>
+                <p className="text-sm text-slate-600 mt-2">
+                  {hasSavingsTarget
+                    ? `Target: ${formatValue(monthlyPlan.effectiveEmergencyTarget)}`
+                    : 'Add a savings target to guide your buffer plan.'}
+                </p>
+              </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                  <div className="bg-white rounded-2xl border border-rose-100 p-5 min-w-0">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                      Immediate priority
+              <div className="text-slate-300 shrink-0">
+                <PiggyBank className="w-8 h-8" />
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#1EB1BB] rounded-full transition-all duration-500"
+                  style={{ width: `${clamp(savingsProgress, 0, 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {monthlyPlan.type === 'deficit' ? (
+          <section className="space-y-6">
+            <div className="bg-white p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+              <SectionIntro
+                icon={<AlertCircle className="w-7 h-7" />}
+                eyebrow="Step 1"
+                title="Get back to zero first"
+                description="Your listed monthly costs are higher than your income. Remove the shortfall first, then move into debt acceleration."
+                iconTone="warning"
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <InsightCard
+                  eyebrow="Current shortfall"
+                  value={formatValue(Math.abs(monthlyPlan.surplus))}
+                  description="This is the monthly gap you need to close first."
+                  tone="warning"
+                />
+
+                <InsightCard
+                  eyebrow="Best place to fix first"
+                  value={trimPlan.quickWin?.name || topBudgetCategories[0]?.name || 'Largest category'}
+                  description={
+                    trimPlan.quickWin
+                      ? `Cutting this by ${formatValue(trimPlan.quickWin.suggestedTrim)} is your fastest fix.`
+                      : topBudgetCategories[0]
+                      ? `This is currently your biggest category at ${formatValue(
+                          topBudgetCategories[0].amount
+                        )}.`
+                      : 'Start with your largest flexible category.'
+                  }
+                />
+
+                <InsightCard
+                  eyebrow="After this fix"
+                  value={formatValue(postTrimBalance)}
+                  description={
+                    deficitResolvedByTrim
+                      ? 'This gets you back to zero and unlocks the next step.'
+                      : 'This reduces pressure, but you may still need one more adjustment.'
+                  }
+                  tone="success"
+                />
+              </div>
+            </div>
+
+            {trimPlan.suggestions.length > 0 && (
+              <div className="bg-white border border-slate-100 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-10 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-8">
+                  <div className="min-w-0">
+                    <p className="text-slate-400 text-[11px] font-black uppercase tracking-widest mb-2">
+                      Step 2
                     </p>
-                    <p className="text-slate-700">
-                      Bring your monthly budget back to zero or above.
+                    <h3 className="text-2xl md:text-3xl font-black text-slate-800 leading-tight">
+                      Fix the gap with one move
+                    </h3>
+                    <p className="text-slate-500 mt-2">
+                      Vayrity can rebalance your flexible spending to remove the shortfall.
                     </p>
                   </div>
 
-                  <div className="bg-white rounded-2xl border border-rose-100 p-5 min-w-0">
+                  <button
+                    onClick={applyTrimPlan}
+                    className="px-5 py-3 rounded-2xl bg-[#1B2B4B] text-white font-black text-sm uppercase tracking-wider hover:bg-slate-800 transition-colors shrink-0 shadow-lg"
+                  >
+                    Fix my budget automatically
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {trimPlan.suggestions.map((suggestion) => (
+                    <div
+                      key={suggestion.id}
+                      className="bg-slate-50 rounded-2xl border border-slate-100 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-black text-slate-800">{suggestion.name}</p>
+                        <p className="text-sm text-slate-500 mt-1">
+                          Cut by {formatValue(suggestion.suggestedTrim)} ({suggestion.percentTrim}%)
+                        </p>
+                      </div>
+
+                      <div className="text-left md:text-right">
+                        <p className="text-sm text-slate-500">
+                          {formatValue(suggestion.currentAmount)} →{' '}
+                          <span className="font-black text-slate-800">
+                            {formatValue(suggestion.newAmount)}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                  <InsightCard
+                    eyebrow="Deficit"
+                    value={formatValue(trimPlan.deficit)}
+                    tone="warning"
+                    compact
+                  />
+
+                  <InsightCard
+                    eyebrow="Suggested trim total"
+                    value={formatValue(trimPlan.totalSuggested)}
+                    compact
+                  />
+
+                  <InsightCard
+                    eyebrow="New monthly balance"
+                    value={formatValue(postTrimBalance)}
+                    tone="success"
+                    compact
+                  />
+                </div>
+              </div>
+            )}
+
+            {trimWasApplied && (
+              <div
+                ref={trimUpdatedRef}
+                className={`bg-white border rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 shadow-sm transition-all duration-700 ${
+                  highlightTrimUpdate
+                    ? 'border-cyan-300 shadow-[0_0_0_6px_rgba(30,177,187,0.10)]'
+                    : 'border-slate-100'
+                }`}
+              >
+                <SectionIntro
+                  icon={<CheckCircle2 className="w-7 h-7" />}
+                  eyebrow="Updated plan"
+                  title="Here’s what changed after applying the fix"
+                  description="Your budget has been rebalanced using the suggested trim targets."
+                  iconTone="success"
+                />
+
+                <div className="mb-5">
+                  <span className="inline-flex items-center px-4 py-2 rounded-full bg-cyan-50 text-[#1EB1BB] text-[11px] font-black uppercase tracking-wider border border-cyan-100">
+                    Plan updated
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <InsightCard
+                    eyebrow="Budget before"
+                    value={formatValue(previousBudgetTotal)}
+                    description="Your previous monthly category total."
+                  />
+
+                  <InsightCard
+                    eyebrow="Budget after"
+                    value={formatValue(currentBudgetTotal)}
+                    description="Your current monthly category total after the trim was applied."
+                    tone="success"
+                  />
+
+                  <InsightCard
+                    eyebrow="Monthly improvement"
+                    value={formatValue(trimAppliedDelta)}
+                    description={
+                      balanceAfterAppliedTrim !== null && balanceAfterAppliedTrim >= 0
+                        ? `This moves your monthly balance to about ${formatValue(
+                            balanceAfterAppliedTrim
+                          )}.`
+                        : `This improves your monthly balance by ${formatValue(
+                            trimAppliedDelta
+                          )}.`
+                    }
+                    tone="success"
+                  />
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-cyan-100 bg-cyan-50 p-4 md:p-5">
+                  <p className="text-sm font-black text-slate-800">
+                    {balanceAfterAppliedTrim !== null && balanceAfterAppliedTrim >= 0
+                      ? 'You are no longer in a monthly deficit based on the applied trim.'
+                      : 'You have reduced the monthly pressure, but may still need one more adjustment.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {trimPlan.suggestions.length === 0 && (
+              <div className="bg-white border border-slate-100 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-10 shadow-sm">
+                <div className="min-w-0">
+                  <p className="text-slate-400 text-[11px] font-black uppercase tracking-widest mb-2">
+                    Step 2
+                  </p>
+                  <h3 className="text-2xl md:text-3xl font-black text-slate-800 leading-tight">
+                    Review essential costs or income
+                  </h3>
+                  <p className="text-slate-500 mt-2">
+                    You do not currently have flexible spending listed to trim, so the next move is
+                    to review essential costs or increase income.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                  <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
                     <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
                       Budget spending
                     </p>
-                    <p className="text-slate-700 break-words">
-                      You currently have {formatValue(totals.budgetSpending)} in monthly budget categories.
+                    <p className="text-2xl font-black text-slate-800">
+                      {formatValue(totals.budgetSpending)}
                     </p>
                   </div>
 
-                  <div className="bg-white rounded-2xl border border-rose-100 p-5 min-w-0">
+                  <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
                     <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                      Best place to review
+                      Monthly gap
                     </p>
-                    <p className="text-slate-700 break-words">
-                      {topBudgetCategories[0]
-                        ? `${topBudgetCategories[0].name} at ${formatValue(
-                            topBudgetCategories[0].amount
-                          )}`
-                        : 'Review your largest category first.'}
+                    <p className="text-2xl font-black text-slate-800">
+                      {formatValue(Math.abs(monthlyPlan.surplus))}
                     </p>
                   </div>
                 </div>
               </div>
+            )}
 
-              {trimPlan.suggestions.length > 0 && (
-                <div className="bg-white border border-slate-100 rounded-[2rem] p-6 md:p-8">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-                        Suggested Budget Trims
-                      </p>
-                      <h4 className="text-xl font-black text-slate-800 mt-2">
-                        Vayrity can rebalance your flexible categories for you.
-                      </h4>
-                    </div>
+            <div className="bg-white p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+              <SectionIntro
+                icon={<Target className="w-7 h-7" />}
+                eyebrow="Step 3"
+                title={hasActiveDebt ? 'Then accelerate debt payoff' : 'Then build your savings'}
+                description={
+                  hasActiveDebt
+                    ? 'Once your monthly balance is stable, focus your extra cash on your priority debt.'
+                    : 'Once your monthly balance is stable, direct the extra money into savings.'
+                }
+              />
 
-                    <button
-                      onClick={applyTrimPlan}
-                      className="px-5 py-3 rounded-2xl bg-[#1B2B4B] text-white font-black text-sm uppercase tracking-wider hover:bg-slate-800 transition-colors"
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <InsightCard
+                  eyebrow="Next focus after stabilising"
+                  value={
+                    hasActiveDebt
+                      ? nextFocusDebt?.name || 'Priority debt'
+                      : 'Emergency savings'
+                  }
+                  description={
+                    hasActiveDebt
+                      ? `Balance: ${formatValue(
+                          nextFocusDebt?.balance || 0
+                        )} · Minimum payment: ${formatValue(
+                          nextFocusDebt?.minPayment || 0
+                        )}/month`
+                      : 'With no active debt, your next move is to build a stronger cash buffer.'
+                  }
+                />
+
+                <InsightCard
+                  eyebrow={hasActiveDebt ? 'Estimated payoff at current payment' : 'Savings target'}
+                  value={
+                    hasActiveDebt
+                      ? totals.payoffEstimate?.valid
+                        ? formatMonthsLabel(totals.payoffEstimate.months)
+                        : 'Not available yet'
+                      : formatValue(monthlyPlan.effectiveEmergencyTarget || 0)
+                  }
+                  description={
+                    hasActiveDebt
+                      ? totals.payoffEstimate?.valid
+                        ? 'This is a useful reference point once your budget is no longer negative.'
+                        : 'Add clearer debt details to estimate this next stage.'
+                      : 'This is the buffer your plan is currently working toward.'
+                  }
+                />
+              </div>
+            </div>
+          </section>
+        ) : (
+          <section className="bg-white p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <SectionIntro
+              icon={<Target className="w-7 h-7" />}
+              eyebrow="Your Monthly Plan"
+              title="Here’s how to use your surplus"
+              description={`You have ${formatValue(
+                monthlyPlan.surplus
+              )} available each month to split between savings and debt payoff.`}
+              iconTone="success"
+            />
+
+            <div className="mt-6 bg-white border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-5 md:p-8">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                    Monthly Actions
+                  </p>
+                  <h4 className="text-2xl font-black text-slate-800 mt-2">
+                    What to do each month
+                  </h4>
+                </div>
+
+                <div className="shrink-0">
+                  <span className="inline-flex items-center px-4 py-2 rounded-full bg-[#1B2B4B] text-white text-[11px] font-black uppercase tracking-wider shadow-sm">
+                    {strategyBadgeLabel}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {resultActions.slice(0, 4).map((action, index) => (
+                  <div
+                    key={`${action.title}-${index}`}
+                    className={`rounded-[1.25rem] md:rounded-2xl border p-4 md:p-5 shadow-sm ${
+                      action.tone === 'success'
+                        ? 'bg-cyan-50 border-cyan-100'
+                        : action.tone === 'warning'
+                        ? 'bg-rose-50 border-rose-100'
+                        : 'bg-white border-slate-100'
+                    }`}
+                  >
+                    <p
+                      className={`text-sm font-black ${
+                        action.tone === 'success'
+                          ? 'text-[#1B2B4B]'
+                          : action.tone === 'warning'
+                          ? 'text-rose-700'
+                          : 'text-slate-800'
+                      }`}
                     >
-                      Apply Suggested Trims
-                    </button>
+                      {index + 1}. {action.title}
+                    </p>
+                    <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                      {action.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {monthlyPlan.actions?.length > 0 && (
+                <div className="mt-6 bg-slate-50 border border-slate-100 rounded-2xl p-5">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-3">
+                    Automated plan logic
+                  </p>
+                  <ul className="space-y-2 text-slate-700">
+                    {monthlyPlan.actions.map((action, index) => (
+                      <li key={`${action}-${index}`}>• {action}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+              <div className="bg-slate-50 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 p-5 md:p-6 min-w-0">
+                <div className="flex items-center gap-3 mb-5 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+                    <Wallet className="w-5 h-5" />
                   </div>
 
-                  <div className="space-y-3">
-                    {trimPlan.suggestions.map((suggestion) => (
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Pay Towards Your Debts
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      Keep minimums covered. Route the extra automatically using your chosen strategy.
+                    </p>
+                  </div>
+                </div>
+
+                {monthlyPlan.debtPlan.length > 0 ? (
+                  <div className="space-y-4">
+                    {monthlyPlan.debtPlan.map((debt) => (
                       <div
-                        key={suggestion.id}
-                        className="bg-slate-50 rounded-2xl border border-slate-100 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+                        key={debt.id}
+                        className={`rounded-2xl border p-4 min-w-0 ${
+                          debt.isPriority
+                            ? 'bg-cyan-50 border-cyan-100'
+                            : 'bg-white border-slate-100'
+                        }`}
                       >
-                        <div className="min-w-0">
-                          <p className="font-black text-slate-800">{suggestion.name}</p>
-                          <p className="text-sm text-slate-500 mt-1">
-                            Cut by {formatValue(suggestion.suggestedTrim)} ({suggestion.percentTrim}%)
-                          </p>
+                        <div className="flex items-start justify-between gap-4 min-w-0">
+                          <div className="min-w-0">
+                            <p className="font-black text-slate-800 break-words">
+                              {debt.name}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              {debt.interest}% APR
+                            </p>
+                            {debt.isPriority && (
+                              <p className="text-[11px] font-black uppercase tracking-wider text-[#1EB1BB] mt-2">
+                                Current target debt
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <p className="text-sm text-slate-500">
+                              {formatValue(debt.minPayment)} minimum
+                            </p>
+                            {debt.extraPayment > 0 && (
+                              <p className="text-sm font-black text-[#1EB1BB] mt-1">
+                                + {formatValue(debt.extraPayment)} extra
+                              </p>
+                            )}
+                            <p className="text-base font-black text-slate-800 mt-1">
+                              {formatValue(debt.totalPlanned)}/month
+                            </p>
+                          </div>
                         </div>
 
-                        <div className="text-left md:text-right">
-                          <p className="text-sm text-slate-500">
-                            {formatValue(suggestion.currentAmount)} →{' '}
-                            <span className="font-black text-slate-800">
-                              {formatValue(suggestion.newAmount)}
-                            </span>
+                        {debt.payoffEstimate.valid && (
+                          <p className="text-xs text-slate-500 mt-3">
+                            At this payment, this debt alone would take about{' '}
+                            {formatMonthsLabel(debt.payoffEstimate.months)} to clear.
                           </p>
-                        </div>
+                        )}
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <div className="bg-white rounded-2xl border border-slate-100 p-5">
+                    <p className="text-slate-600">
+                      No debt added, so your available money can go fully into savings.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-50 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 p-5 md:p-6 min-w-0">
+                <div className="flex items-center gap-3 mb-5 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-[#1EB1BB] flex items-center justify-center shrink-0">
+                    <PiggyBank className="w-5 h-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Build Your Emergency Fund
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      A stronger buffer helps you avoid borrowing again.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
+                  <p className="text-3xl font-black text-slate-800 break-words">
+                    {formatValue(monthlyPlan.savingsAllocation)}/month
+                  </p>
+
+                  <p className="text-sm text-slate-500 mt-2 break-words">
+                    Working target: {formatValue(monthlyPlan.effectiveEmergencyTarget)}
+                  </p>
+                  <p className="text-sm text-slate-500 break-words">
+                    Current savings: {formatValue(monthlyPlan.currentSavings)}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-2 break-words">
+                    Your own target: {formatValue(monthlyPlan.emergencyTarget)} · Recommended based
+                    on essentials: {formatValue(monthlyPlan.recommendedEmergencyTarget)}
+                  </p>
+
+                  <div className="mt-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                      <span>Progress</span>
+                      <span className="break-words">
+                        {formatValue(monthlyPlan.currentSavings)} /{' '}
+                        {formatValue(monthlyPlan.effectiveEmergencyTarget)}
+                      </span>
+                    </div>
+
+                    <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#1EB1BB] rounded-full transition-all duration-500"
+                        style={{ width: `${clamp(savingsProgress, 0, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+              <div className="bg-slate-50 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 p-5 md:p-6 min-w-0">
+                <div className="flex items-center gap-3 mb-5 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+                    <CalendarClock className="w-5 h-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Your Progress Timeline
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      A simple view of where this plan leads.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <InsightCard
+                    eyebrow="Debt-free estimate"
+                    value={
+                      monthlyPlan.debtTimeline?.valid
+                        ? monthlyPlan.debtTimeline.months === 0
+                          ? 'No active debt'
+                          : formatMonthsLabel(monthlyPlan.debtTimeline.months)
+                        : 'Needs clearer debt details'
+                    }
+                  />
+
+                  <InsightCard
+                    eyebrow="Emergency fund estimate"
+                    value={
+                      monthlyPlan.emergencyFundMonths === 0
+                        ? 'Already funded'
+                        : monthlyPlan.emergencyFundMonths
+                        ? formatMonthsLabel(monthlyPlan.emergencyFundMonths)
+                        : monthlyPlan.savingsAllocation > 0
+                        ? 'In progress'
+                        : 'Not funded yet'
+                    }
+                  />
+
+                  {firstPayoffMoment && (
+                    <InsightCard
+                      eyebrow="First likely payoff"
+                      value={firstPayoffMoment.name}
+                      description={`Expected ${getMonthsFromNowLabel(firstPayoffMoment.month)}`}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 p-5 md:p-6 min-w-0">
+                <div className="flex items-center gap-3 mb-5 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+                    <Info className="w-5 h-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Fastest Lever
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      The easiest place to improve this plan if you want faster results.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <InsightCard
+                    eyebrow={hasFlexibleSpending ? 'Flexible spending' : 'Spending structure'}
+                    value={formatValue(totals.nonEssentialBudgetTotal)}
+                    description={
+                      hasFlexibleSpending
+                        ? 'This is your quickest source of extra payoff capacity.'
+                        : 'You have little or no flexible spending listed, so progress will mostly come from income growth or lower essential costs.'
+                    }
+                  />
+
+                  <InsightCard
+                    eyebrow={hasFlexibleSpending ? 'First category to review' : 'Largest category'}
+                    value={topBudgetCategories[0]?.name || 'None added'}
+                    description={
+                      topBudgetCategories[0]
+                        ? hasFlexibleSpending
+                          ? formatValue(topBudgetCategories[0].amount)
+                          : `${formatValue(topBudgetCategories[0].amount)} · mostly essentials`
+                        : 'Add categories to see your biggest cost.'
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="bg-slate-50 rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 p-5 md:p-6 min-w-0">
+                <div className="flex items-center gap-3 mb-5 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+                    <Info className="w-5 h-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Why This Plan Works
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      Simple, practical, and based on your current numbers.
+                    </p>
+                  </div>
+                </div>
+
+                <InsightCard>
+                  <p className="text-slate-700 leading-relaxed break-words">
+                    {monthlyPlan.explanation}
+                  </p>
+
+                  {monthlyPlan.interestSavedVsMinimums > 0 && (
+                    <p className="text-sm font-bold text-[#1EB1BB] mt-4">
+                      This plan could save about {formatValue(monthlyPlan.interestSavedVsMinimums)} in
+                      interest versus staying at minimum payments only.
+                    </p>
+                  )}
+
+                  {topBudgetCategories[0] && (
+                    <p className="text-sm text-slate-500 mt-4 break-words">
+                      If you want faster progress, first review{' '}
+                      <span className="font-bold text-slate-800">
+                        {topBudgetCategories[0].name}
+                      </span>{' '}
+                      at {formatValue(topBudgetCategories[0].amount)}.
+                    </p>
+                  )}
+                </InsightCard>
+              </div>
+            </div>
+
+            {comparisonPlan?.debtTimeline?.valid &&
+              monthlyPlan?.debtTimeline?.valid &&
+              monthlyPlan.debtPlan.length > 1 &&
+              (Math.abs(comparisonInterestDelta) >= 25 ||
+                comparisonPlan.debtTimeline.months !== monthlyPlan.debtTimeline.months) && (
+                <div className="mt-6 bg-white border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-5 md:p-8">
+                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                    Strategy Comparison
+                  </p>
+                  <h4 className="text-2xl font-black text-slate-800 mt-2">
+                    {payoffStrategy === PAYOFF_STRATEGIES.avalanche
+                      ? 'Avalanche vs snowball'
+                      : 'Snowball vs avalanche'}
+                  </h4>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4">
+                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
                       <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Deficit
+                        Current strategy
                       </p>
-                      <p className="text-2xl font-black text-slate-800">
-                        {formatValue(trimPlan.deficit)}
+                      <p className="text-xl font-black text-slate-800">
+                        {payoffStrategy === PAYOFF_STRATEGIES.avalanche
+                          ? 'Avalanche'
+                          : 'Snowball'}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-2">
+                        {formatMonthsLabel(monthlyPlan.debtTimeline.months)} ·{' '}
+                        {formatValue(monthlyPlan.debtTimeline.totalInterest)} interest
                       </p>
                     </div>
 
-                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4">
+                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
                       <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Suggested trim total
+                        Other strategy
                       </p>
-                      <p className="text-2xl font-black text-slate-800">
-                        {formatValue(trimPlan.totalSuggested)}
+                      <p className="text-xl font-black text-slate-800">
+                        {payoffStrategy === PAYOFF_STRATEGIES.avalanche
+                          ? 'Snowball'
+                          : 'Avalanche'}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-2">
+                        {formatMonthsLabel(comparisonPlan.debtTimeline.months)} ·{' '}
+                        {formatValue(comparisonPlan.debtTimeline.totalInterest)} interest
                       </p>
                     </div>
 
-                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4">
+                    <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
                       <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Gap after trims
+                        Difference
                       </p>
-                      <p className="text-2xl font-black text-slate-800">
-                        {formatValue(trimPlan.remainingGap)}
+                      <p className="text-xl font-black text-slate-800">
+                        {comparisonInterestDelta === 0
+                          ? 'Very similar'
+                          : comparisonInterestDelta > 0
+                          ? `${formatValue(comparisonInterestDelta)} less interest`
+                          : `${formatValue(Math.abs(comparisonInterestDelta))} more interest`}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-2">
+                        Use this to balance quick wins against total interest cost.
                       </p>
                     </div>
                   </div>
                 </div>
               )}
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-slate-50 rounded-[2rem] border border-slate-100 p-6 min-w-0">
-                  <div className="flex items-center gap-3 mb-5 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
-                      <Wallet className="w-5 h-5" />
-                    </div>
+          </section>
+        )}
 
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                        Pay Towards Your Debts
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        Minimums stay covered. Extra routes automatically using your chosen strategy.
-                      </p>
-                    </div>
-                  </div>
-
-                  {monthlyPlan.debtPlan.length > 0 ? (
-                    <div className="space-y-4">
-                      {monthlyPlan.debtPlan.map((debt) => (
-                        <div
-                          key={debt.id}
-                          className={`rounded-2xl border p-4 min-w-0 ${
-                            debt.isPriority
-                              ? 'bg-cyan-50 border-cyan-100'
-                              : 'bg-white border-slate-100'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-4 min-w-0">
-                            <div className="min-w-0">
-                              <p className="font-black text-slate-800 break-words">
-                                {debt.name}
-                              </p>
-                              <p className="text-xs text-slate-400 mt-1">
-                                {debt.interest}% APR
-                              </p>
-                              {debt.isPriority && (
-                                <p className="text-[11px] font-black uppercase tracking-wider text-[#1EB1BB] mt-2">
-                                  Current target debt
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="text-right shrink-0">
-                              <p className="text-sm text-slate-500">
-                                {formatValue(debt.minPayment)} minimum
-                              </p>
-                              {debt.extraPayment > 0 && (
-                                <p className="text-sm font-black text-[#1EB1BB] mt-1">
-                                  + {formatValue(debt.extraPayment)} extra
-                                </p>
-                              )}
-                              <p className="text-base font-black text-slate-800 mt-1">
-                                {formatValue(debt.totalPlanned)}/month
-                              </p>
-                            </div>
-                          </div>
-
-                          {debt.payoffEstimate.valid && (
-                            <p className="text-xs text-slate-500 mt-3">
-                              At this payment, this debt alone would take about{' '}
-                              {formatMonthsLabel(debt.payoffEstimate.months)} to clear.
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="bg-white rounded-2xl border border-slate-100 p-5">
-                      <p className="text-slate-600">
-                        No debt added, so your available money can go fully into savings.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-slate-50 rounded-[2rem] border border-slate-100 p-6 min-w-0">
-                  <div className="flex items-center gap-3 mb-5 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-[#1EB1BB] flex items-center justify-center shrink-0">
-                      <PiggyBank className="w-5 h-5" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                        Build Your Emergency Fund
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        A small buffer reduces the chance of borrowing again.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                    <p className="text-3xl font-black text-slate-800 break-words">
-                      {formatValue(monthlyPlan.savingsAllocation)}/month
-                    </p>
-
-                    <p className="text-sm text-slate-500 mt-2 break-words">
-                      Working target: {formatValue(monthlyPlan.effectiveEmergencyTarget)}
-                    </p>
-                    <p className="text-sm text-slate-500 break-words">
-                      Current savings: {formatValue(monthlyPlan.currentSavings)}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-2 break-words">
-                      Your own target: {formatValue(monthlyPlan.emergencyTarget)} · Recommended based on essentials:{' '}
-                      {formatValue(monthlyPlan.recommendedEmergencyTarget)}
-                    </p>
-
-                    <div className="mt-5">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        <span>Progress</span>
-                        <span className="break-words">
-                          {formatValue(monthlyPlan.currentSavings)} /{' '}
-                          {formatValue(monthlyPlan.effectiveEmergencyTarget)}
-                        </span>
-                      </div>
-
-                      <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[#1EB1BB] rounded-full transition-all duration-500"
-                          style={{ width: `${clamp(savingsProgress, 0, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-                <div className="bg-slate-50 rounded-[2rem] border border-slate-100 p-6 min-w-0">
-                  <div className="flex items-center gap-3 mb-5 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
-                      <CalendarClock className="w-5 h-5" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                        Your Progress Timeline
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        A clearer view of what this plan could lead to.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Debt-free estimate
-                      </p>
-                      <p className="text-2xl font-black text-slate-800 break-words">
-                        {monthlyPlan.debtTimeline?.valid
-                          ? monthlyPlan.debtTimeline.months === 0
-                            ? 'No active debt'
-                            : formatMonthsLabel(monthlyPlan.debtTimeline.months)
-                          : 'Needs clearer debt details'}
-                      </p>
-                    </div>
-
-                    <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Emergency fund estimate
-                      </p>
-                      <p className="text-2xl font-black text-slate-800 break-words">
-                        {monthlyPlan.emergencyFundMonths === 0
-                          ? 'Already funded'
-                          : monthlyPlan.emergencyFundMonths
-                          ? formatMonthsLabel(monthlyPlan.emergencyFundMonths)
-                          : monthlyPlan.savingsAllocation > 0
-                          ? 'In progress'
-                          : 'Not funded yet'}
-                      </p>
-                    </div>
-
-                    {firstPayoffMoment && (
-                      <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                          First likely payoff
-                        </p>
-                        <p className="text-lg font-black text-slate-800 break-words">
-                          {firstPayoffMoment.name}
-                        </p>
-                        <p className="text-sm text-slate-500 mt-2">
-                          Expected {getMonthsFromNowLabel(firstPayoffMoment.month)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 rounded-[2rem] border border-slate-100 p-6 min-w-0">
-                  <div className="flex items-center gap-3 mb-5 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
-                      <Info className="w-5 h-5" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                        Spending Summary
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        Your total monthly category budget at a glance.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Budget total
-                      </p>
-                      <p className="text-2xl font-black text-slate-800 break-words">
-                        {formatValue(totals.budgetSpending)}
-                      </p>
-                    </div>
-
-                    <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Flexible spending
-                      </p>
-                      <p className="text-2xl font-black text-slate-800 break-words">
-                        {formatValue(totals.nonEssentialBudgetTotal)}
-                      </p>
-                      <p className="text-sm text-slate-500 mt-2">
-                        This is your fastest source of extra debt payoff capacity.
-                      </p>
-                    </div>
-
-                    <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        Largest category
-                      </p>
-                      <p className="text-2xl font-black text-slate-800 break-words">
-                        {topBudgetCategories[0]?.name || 'None added'}
-                      </p>
-                      {topBudgetCategories[0] && (
-                        <p className="text-sm text-slate-500 mt-2">
-                          {formatValue(topBudgetCategories[0].amount)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 rounded-[2rem] border border-slate-100 p-6 min-w-0">
-                  <div className="flex items-center gap-3 mb-5 min-w-0">
-                    <div className="w-11 h-11 rounded-2xl bg-white border border-slate-100 text-slate-500 flex items-center justify-center shrink-0">
-                      <Info className="w-5 h-5" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                        Why This Plan Works
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        Clear, practical, and built from your current numbers.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-2xl border border-slate-100 p-5 min-w-0">
-                    <p className="text-slate-700 leading-relaxed break-words">
-                      {monthlyPlan.explanation}
-                    </p>
-
-                    {monthlyPlan.interestSavedVsMinimums > 0 && (
-                      <p className="text-sm font-bold text-[#1EB1BB] mt-4">
-                        This plan could save about {formatValue(monthlyPlan.interestSavedVsMinimums)} in interest
-                        compared with making minimum payments only.
-                      </p>
-                    )}
-
-                    {topBudgetCategories[0] && (
-                      <p className="text-sm text-slate-500 mt-4 break-words">
-                        If you want faster progress, first review{' '}
-                        <span className="font-bold text-slate-800">
-                          {topBudgetCategories[0].name}
-                        </span>{' '}
-                        at {formatValue(topBudgetCategories[0].amount)}.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 bg-white border border-slate-100 rounded-[2rem] p-6 md:p-8">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-                      Action Steps
-                    </p>
-                    <h4 className="text-2xl font-black text-slate-800 mt-2">
-                      What to do next each month
-                    </h4>
-                  </div>
-
-                  <div className="shrink-0">
-                    <span className="inline-flex items-center px-4 py-2 rounded-full bg-cyan-50 text-[#1EB1BB] text-[11px] font-black uppercase tracking-wider">
-                      {payoffStrategy === PAYOFF_STRATEGIES.avalanche
-                        ? 'Avalanche active'
-                        : 'Snowball active'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {resultActions.map((action, index) => (
-                    <div
-                      key={`${action.title}-${index}`}
-                      className={`rounded-2xl border p-5 ${
-                        action.tone === 'success'
-                          ? 'bg-cyan-50 border-cyan-100'
-                          : action.tone === 'warning'
-                          ? 'bg-rose-50 border-rose-100'
-                          : 'bg-slate-50 border-slate-100'
-                      }`}
-                    >
-                      <p className="text-sm font-black text-slate-800">
-                        {index + 1}. {action.title}
-                      </p>
-                      <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-                        {action.detail}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                {monthlyPlan.actions?.length > 0 && (
-                  <div className="mt-6 bg-slate-50 border border-slate-100 rounded-2xl p-5">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-3">
-                      Automated plan logic
-                    </p>
-                    <ul className="space-y-2 text-slate-700">
-                      {monthlyPlan.actions.map((action, index) => (
-                        <li key={`${action}-${index}`}>• {action}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-
-              {comparisonPlan?.debtTimeline?.valid &&
-                monthlyPlan?.debtTimeline?.valid &&
-                monthlyPlan.debtPlan.length > 1 && (
-                  <div className="mt-6 bg-white border border-slate-100 rounded-[2rem] p-6 md:p-8">
-                    <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-                      Strategy Comparison
-                    </p>
-                    <h4 className="text-2xl font-black text-slate-800 mt-2">
-                      {payoffStrategy === PAYOFF_STRATEGIES.avalanche
-                        ? 'Avalanche vs snowball'
-                        : 'Snowball vs avalanche'}
-                    </h4>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                      <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
-                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                          Current strategy
-                        </p>
-                        <p className="text-xl font-black text-slate-800">
-                          {payoffStrategy === PAYOFF_STRATEGIES.avalanche
-                            ? 'Avalanche'
-                            : 'Snowball'}
-                        </p>
-                        <p className="text-sm text-slate-500 mt-2">
-                          {formatMonthsLabel(monthlyPlan.debtTimeline.months)} ·{' '}
-                          {formatValue(monthlyPlan.debtTimeline.totalInterest)} interest
-                        </p>
-                      </div>
-
-                      <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
-                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                          Other strategy
-                        </p>
-                        <p className="text-xl font-black text-slate-800">
-                          {payoffStrategy === PAYOFF_STRATEGIES.avalanche
-                            ? 'Snowball'
-                            : 'Avalanche'}
-                        </p>
-                        <p className="text-sm text-slate-500 mt-2">
-                          {formatMonthsLabel(comparisonPlan.debtTimeline.months)} ·{' '}
-                          {formatValue(comparisonPlan.debtTimeline.totalInterest)} interest
-                        </p>
-                      </div>
-
-                      <div className="bg-slate-50 rounded-2xl border border-slate-100 p-5">
-                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                          Difference
-                        </p>
-                        <p className="text-xl font-black text-slate-800">
-                          {comparisonInterestDelta === 0
-                            ? 'Very similar'
-                            : comparisonInterestDelta > 0
-                            ? `${formatValue(comparisonInterestDelta)} less interest`
-                            : `${formatValue(Math.abs(comparisonInterestDelta))} more interest`}
-                        </p>
-                        <p className="text-sm text-slate-500 mt-2">
-                          Useful if you want to balance motivation against total cost.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-            </>
-          )}
-        </section>
-
-        {totals.priorityDebt && totals.payoffEstimate && (
-          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        {canShowDebtAcceleration && hasActiveDebt && totals.priorityDebt && totals.payoffEstimate && (
+          <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
             <h3 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2 min-w-0">
               <Info className="w-4 h-4 shrink-0" /> Estimated payoff for{' '}
               {totals.priorityDebt.name || 'your priority debt'}
             </h3>
+
+            {monthlyPlan.type === 'deficit' && (
+              <div className="mb-6 bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                <p className="text-sm font-bold text-slate-800">
+                  Use this as your next step after you fix the monthly gap.
+                </p>
+              </div>
+            )}
 
             {totals.payoffEstimate.valid ? (
               <>
@@ -3190,9 +4005,9 @@ export default function App() {
                       {formatMonthsLabel(totals.payoffEstimate.months)}
                     </p>
                     <p className="text-sm text-slate-500 mt-1 break-words">
-                      At your current payment of {formatValue(totals.priorityDebt.minPayment)} per month,
-                      {` ${totals.priorityDebt.name || 'this debt'} `}
-                      could be cleared in about {formatMonthsLabel(totals.payoffEstimate.months)}.
+                      At your current payment of {formatValue(totals.priorityDebt.minPayment)} per
+                      month, {totals.priorityDebt.name || 'this debt'} could be cleared in about{' '}
+                      {formatMonthsLabel(totals.payoffEstimate.months)}.
                     </p>
                   </div>
 
@@ -3314,7 +4129,7 @@ export default function App() {
         )}
 
         <div
-          className={`bg-white p-8 md:p-16 rounded-[3rem] border-2 shadow-xl ${totals.tier.border} max-w-3xl mx-auto w-full relative overflow-hidden`}
+          className={`bg-white p-6 md:p-16 rounded-[2rem] md:rounded-[3rem] border-2 shadow-xl ${totals.tier.border} max-w-3xl mx-auto w-full relative overflow-hidden`}
         >
           <div
             className={`absolute -top-6 left-8 md:left-12 p-4 rounded-2xl ${totals.tier.bg} ${totals.tier.color} shadow-lg`}
@@ -3326,95 +4141,60 @@ export default function App() {
             )}
           </div>
 
-          <div className="mt-8">
+          <div className="mt-6 md:mt-8">
             <h3 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
               <Info className="w-4 h-4 shrink-0" /> Strategic Recommendation
             </h3>
 
             <div className="space-y-6 text-slate-600 text-lg leading-relaxed">
-              {totals.remaining < 0 ? (
+              {monthlyPlan.type === 'deficit' ? (
                 <>
                   <p className="font-bold text-slate-800 text-xl">
-                    Your current position is under pressure.
+                    This gap looks fixable.
                   </p>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        What this means
-                      </p>
-                      <p className="text-slate-700 leading-relaxed">
-                        Your listed monthly costs are currently higher than your income. This may
-                        explain why things feel difficult to manage right now.
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        What to focus on
-                      </p>
-                      <ul className="space-y-2 text-slate-700">
-                        <li>• Review your largest budget categories first</li>
-                        <li>• Check which debt is costing the most in interest</li>
-                        <li>• Keep essential bills and spending realistic</li>
-                      </ul>
-                    </div>
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
+                    <p className="text-slate-700 leading-relaxed">
+                      {trimPlan.quickWin
+                        ? `Best move: reduce ${trimPlan.quickWin.name} by ${formatValue(
+                            trimPlan.quickWin.suggestedTrim
+                          )} to get back to zero.`
+                        : 'Best move: reduce flexible spending until your monthly balance reaches zero or above.'}
+                    </p>
                   </div>
 
-                  {topTrimCategory && (
-                    <div className="bg-cyan-50 rounded-2xl p-5 border border-cyan-100 mt-2 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-[#1EB1BB] mb-2">
-                        Best place to start reviewing
-                      </p>
-                      <p className="text-slate-800 font-bold break-words">
-                        {topTrimCategory.name} — currently {formatValue(topTrimCategory.amount)}
-                      </p>
-                      <p className="text-slate-600 text-sm mt-2">
-                        This is your largest flexible budget category and the first place to assess
-                        for possible reductions.
-                      </p>
-                    </div>
-                  )}
+                  <div className="bg-cyan-50 rounded-2xl p-5 border border-cyan-100 mt-2 min-w-0">
+                    <p className="text-slate-800 font-bold break-words">
+                      Next: focus on {nextFocusDebt?.name || 'your priority debt'}.
+                    </p>
+                  </div>
                 </>
               ) : (
                 <>
                   <p className="font-bold text-slate-800 text-xl">
-                    You have some room to make progress.
+                    You now have room to make steady progress.
                   </p>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        What this means
-                      </p>
-                      <p className="text-slate-700 leading-relaxed">
-                        You currently have money left after your listed obligations. That gives you
-                        room to automate savings and speed up debt payoff.
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                        What to focus on
-                      </p>
-                      <ul className="space-y-2 text-slate-700">
-                        <li>• Follow the monthly plan consistently</li>
-                        <li>• Keep up minimum payments on every debt</li>
-                        <li>• Review your biggest spending categories regularly</li>
-                      </ul>
-                    </div>
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
+                    <p className="text-slate-700 leading-relaxed">
+                      Best move: follow the plan consistently and protect the extra payment going to{' '}
+                      {nextFocusDebt?.name || 'your target debt'}.
+                    </p>
                   </div>
 
                   {topBudgetCategories[0] && (
                     <div className="bg-cyan-50 rounded-2xl p-5 border border-cyan-100 mt-2 min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wider text-[#1EB1BB] mb-2">
-                        If you want faster progress
-                      </p>
                       <p className="text-slate-800 font-bold break-words">
-                        Review {topBudgetCategories[0].name} first
+                        {hasFlexibleSpending
+                          ? `Faster progress: review ${topBudgetCategories[0].name} first.`
+                          : `Largest cost: ${topBudgetCategories[0].name}.`}
                       </p>
                       <p className="text-slate-600 text-sm mt-2 break-words">
-                        It is your largest category at {formatValue(topBudgetCategories[0].amount)}.
+                        {hasFlexibleSpending
+                          ? `It is your largest category at ${formatValue(topBudgetCategories[0].amount)}.`
+                          : `It is currently your biggest listed cost at ${formatValue(
+                              topBudgetCategories[0].amount
+                            )}.`}
                       </p>
                     </div>
                   )}
@@ -3423,6 +4203,8 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        <DisclaimerCard />
 
         <div className="text-center">
           <button
@@ -3439,7 +4221,11 @@ export default function App() {
   const progressSteps = [2, 3, 4];
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans flex flex-col selection:bg-cyan-100 selection:text-[#1EB1BB] overflow-x-hidden">
+    <div
+      className={`min-h-screen text-slate-900 font-sans flex flex-col selection:bg-cyan-100 selection:text-[#1EB1BB] overflow-x-hidden ${
+        isPrintMode ? 'bg-white' : 'bg-[#f8fafc]'
+      }`}
+    >
       {step > 0 && (
         <header className="p-4 md:p-8 flex justify-between items-center bg-white/80 backdrop-blur-xl sticky top-0 z-50 border-b border-slate-100">
           <div className="flex items-center justify-between w-full max-w-7xl mx-auto gap-4 min-w-0">
@@ -3541,7 +4327,11 @@ export default function App() {
           <div className="bg-[#1B2B4B] text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center justify-between gap-4 min-w-0">
             <div className="min-w-0">
               <p className="font-black text-sm">
-                {lastDeleted.type === 'debt' ? 'Debt deleted' : 'Bill deleted'}
+                {lastDeleted.type === 'debt'
+                  ? 'Debt deleted'
+                  : lastDeleted.type === 'bill'
+                  ? 'Bill deleted'
+                  : 'Budget item deleted'}
               </p>
               <p className="text-xs text-white/70 truncate">
                 {lastDeleted.item?.name || 'Item'}
@@ -3564,7 +4354,7 @@ export default function App() {
             <div className="min-w-0">
               <p className="font-black text-sm">Trim targets applied</p>
               <p className="text-xs text-white/70">
-                Your budget category targets have been updated.
+                Your budget has been updated. Check the Results screen to compare before vs after.
               </p>
             </div>
 
@@ -3659,6 +4449,43 @@ export default function App() {
         .no-scrollbar {
           -ms-overflow-style: none;
           scrollbar-width: none;
+        }
+
+        @media print {
+          html, body, #root {
+            background: white !important;
+            overflow: visible !important;
+          }
+
+          body * {
+            visibility: hidden;
+          }
+
+          .print-summary,
+          .print-summary * {
+            visibility: visible;
+          }
+
+          .print-summary {
+            display: block !important;
+            position: relative;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+
+          header,
+          main > *:not(.print-summary),
+          .sticky,
+          button,
+          .no-print {
+            display: none !important;
+          }
+
+          @page {
+            size: A4;
+            margin: 16mm;
+          }
         }
       `}</style>
     </div>
