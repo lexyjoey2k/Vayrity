@@ -43,10 +43,15 @@ const BILL_PRESETS = [
 const DEBT_PRESETS = [
   'Credit Card',
   'Loan',
+  'Mortgage',
   'Overdraft',
   'Car Finance',
   'Buy Now Pay Later',
 ];
+
+const isMortgageDebt = (debt) =>
+  Boolean(debt?.isMortgage) ||
+  String(debt?.name || '').trim().toLowerCase() === 'mortgage';
 
 const BUDGET_CATEGORY_PRESETS = [
   { name: 'Groceries', type: 'essential' },
@@ -83,12 +88,14 @@ const createBudgetCategory = (name = '', type = 'essential') => ({
   type,
 });
 
-const createDebt = (name = '') => ({
+const createDebt = (name = '', { isMortgage = false } = {}) => ({
   id: crypto.randomUUID(),
   name: name || 'New Debt',
   balance: '',
   interest: '',
   minPayment: '',
+  isMortgage:
+    isMortgage || String(name || '').trim().toLowerCase() === 'mortgage',
 });
 
 const createBill = (name = '') => ({
@@ -192,7 +199,9 @@ const getWeekLabel = (weekKey) => {
 };
 
 const sortDebtsByStrategy = (debts, strategy = PAYOFF_STRATEGIES.avalanche) => {
-  const activeDebts = debts.filter((debt) => toNumber(debt.balance) > 0.01);
+  const activeDebts = debts.filter(
+    (debt) => toNumber(debt.balance) > 0.01 && !isMortgageDebt(debt)
+  );
 
   if (strategy === PAYOFF_STRATEGIES.snowball) {
     return [...activeDebts].sort((a, b) => {
@@ -288,6 +297,9 @@ const normalizeLoadedState = (parsed) => {
         balance: debt.balance ?? '',
         interest: debt.interest ?? '',
         minPayment: debt.minPayment ?? '',
+        isMortgage:
+          Boolean(debt.isMortgage) ||
+          String(debt.name || '').trim().toLowerCase() === 'mortgage',
       }))
     : [];
 
@@ -467,6 +479,7 @@ const calculatePortfolioPayoff = (
   strategy = PAYOFF_STRATEGIES.avalanche
 ) => {
   const cleanedDebts = debts
+    .filter((debt) => !isMortgageDebt(debt))
     .map((debt) => ({
       id: debt.id,
       name: debt.name || 'Debt',
@@ -603,7 +616,7 @@ const calculateSavingsDebtBlend = (state, totals) => {
   const emergencyGap = Math.max(0, effectiveEmergencyTarget - currentSavings);
   const remaining = toNumber(totals.remaining);
   const validDebts = (state.debts || []).filter(
-    (debt) => toNumber(debt.balance) > 0
+    (debt) => toNumber(debt.balance) > 0 && !isMortgageDebt(debt)
   );
 
   return {
@@ -1436,6 +1449,7 @@ const PrintSummary = ({
 export default function App() {
   const [step, setStep] = useState(0);
   const [expandedDebtId, setExpandedDebtId] = useState(null);
+  const debtCardRefs = useRef({});
   const [expandedBillId, setExpandedBillId] = useState(null);
   const [expandedBudgetCategoryId, setExpandedBudgetCategoryId] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
@@ -2261,12 +2275,17 @@ export default function App() {
   };
 
   const addDebt = (name = '') => {
-    const debt = createDebt(name);
+    const isMortgage =
+      String(name || '').trim().toLowerCase() === 'mortgage';
+    const debt = createDebt(name, { isMortgage });
 
-    setState((prev) => ({
-      ...prev,
-      debts: [debt, ...prev.debts],
-    }));
+    setState((prev) => {
+      // Keep mortgages at the bottom of the list (Long-Term Debt section)
+      if (isMortgage) {
+        return { ...prev, debts: [...prev.debts, debt] };
+      }
+      return { ...prev, debts: [debt, ...prev.debts] };
+    });
 
     setExpandedDebtId(debt.id);
   };
@@ -2303,6 +2322,22 @@ export default function App() {
   const toggleDebt = (id) => {
     setExpandedDebtId((current) => (current === id ? null : id));
   };
+
+  useEffect(() => {
+    if (!expandedDebtId) return;
+    const id = expandedDebtId;
+    const handle = setTimeout(() => {
+      requestAnimationFrame(() => {
+        const el = debtCardRefs.current[id];
+        if (!el) return;
+        const debt = state.debts.find((d) => d.id === id);
+        const offset = debt && isMortgageDebt(debt) ? 24 : 16;
+        const top = el.getBoundingClientRect().top + window.scrollY - offset;
+        window.scrollTo({ top, behavior: 'smooth' });
+      });
+    }, 0);
+    return () => clearTimeout(handle);
+  }, [expandedDebtId, state.debts]);
 
   const addBill = (name = '') => {
     const bill = createBill(name);
@@ -3108,8 +3143,8 @@ export default function App() {
               If you have no debts, skip this step. Your surplus will go straight toward building savings. If you do have debts, use the presets above to add them.
             </p>
           </div>
-        ) : (
-          state.debts.map((debt) => {
+        ) : ((() => {
+          const renderDebtCard = (debt) => {
             const isOpen = expandedDebtId === debt.id;
             const status = getDebtStatus(debt);
 
@@ -3131,7 +3166,14 @@ export default function App() {
             return (
               <div
                 key={debt.id}
-                className={`bg-white rounded-[2rem] border shadow-sm transition-all overflow-hidden min-w-0 ${
+                ref={(el) => {
+                  if (el) {
+                    debtCardRefs.current[debt.id] = el;
+                  } else {
+                    delete debtCardRefs.current[debt.id];
+                  }
+                }}
+                className={`bg-white rounded-[2rem] border shadow-sm transition-all overflow-hidden min-w-0 scroll-mt-4 ${
                   isOpen
                     ? 'border-[#1EB1BB] shadow-lg'
                     : 'border-slate-100 hover:border-slate-200'
@@ -3165,10 +3207,17 @@ export default function App() {
                         </div>
 
                         {currentPayoff.valid && (
-                          <p className="mt-3 text-xs font-bold text-[#1EB1BB]">
-                            Estimated payoff at current payment: {formatMonthsLabel(currentPayoff.months)}
+                          <p
+                            className={`mt-3 text-xs font-bold ${
+                              isMortgageDebt(debt) ? 'text-slate-500' : 'text-[#1EB1BB]'
+                            }`}
+                          >
+                            {isMortgageDebt(debt)
+                              ? `Time remaining: ${formatMonthsLabel(currentPayoff.months)}`
+                              : `Estimated payoff at current payment: ${formatMonthsLabel(currentPayoff.months)}`}
                           </p>
                         )}
+
                       </div>
                     </button>
 
@@ -3306,10 +3355,14 @@ export default function App() {
                             {formatValue(minimumNeededToReduce)}/month to start bringing it down.
                           </p>
                         ) : currentPayoff.valid ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div
+                            className={`grid grid-cols-1 gap-3 ${
+                              isMortgageDebt(debt) ? 'md:grid-cols-2' : 'md:grid-cols-3'
+                            }`}
+                          >
                             <div className="bg-white rounded-xl border border-slate-100 p-4">
                               <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
-                                Payoff time
+                                {isMortgageDebt(debt) ? 'Time remaining' : 'Payoff time'}
                               </p>
                               <p className="text-lg font-black text-slate-800">
                                 {formatMonthsLabel(currentPayoff.months)}
@@ -3325,16 +3378,18 @@ export default function App() {
                               </p>
                             </div>
 
-                            <div className="bg-white rounded-xl border border-slate-100 p-4">
-                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
-                                Better use of extra cash
-                              </p>
-                              <p className="text-sm font-bold text-slate-700">
-                                {payoffStrategy === PAYOFF_STRATEGIES.avalanche
-                                  ? 'Highest APR gets extra first'
-                                  : 'Smallest balance gets extra first'}
-                              </p>
-                            </div>
+                            {!isMortgageDebt(debt) && (
+                              <div className="bg-white rounded-xl border border-slate-100 p-4">
+                                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                                  Better use of extra cash
+                                </p>
+                                <p className="text-sm font-bold text-slate-700">
+                                  {payoffStrategy === PAYOFF_STRATEGIES.avalanche
+                                    ? 'Highest APR gets extra first'
+                                    : 'Smallest balance gets extra first'}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <p className="text-sm text-slate-500">
@@ -3347,8 +3402,47 @@ export default function App() {
                 )}
               </div>
             );
-          })
-        )}
+          };
+
+          const consumerDebts = state.debts.filter((d) => !isMortgageDebt(d));
+          const mortgageDebts = state.debts.filter(isMortgageDebt);
+          const consumerCleared =
+            consumerDebts.length > 0 &&
+            consumerDebts.every((d) => toNumber(d.balance) <= 0.01);
+
+          return (
+            <>
+              {consumerDebts.map(renderDebtCard)}
+
+              {mortgageDebts.length > 0 && (
+                <>
+                  {consumerCleared && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-[2rem] p-5 md:p-6 mx-2">
+                      <p className="text-[11px] font-black uppercase tracking-widest text-emerald-700 mb-2">
+                        All other debt cleared
+                      </p>
+                      <p className="text-sm text-emerald-800 leading-relaxed">
+                        Now redirect freed cash to mortgage overpayments.
+                      </p>
+                    </div>
+                  )}
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 mx-2 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] font-black uppercase tracking-widest text-amber-700">
+                        Your Home Loan
+                      </span>
+                      <span className="flex-1 h-px bg-amber-200" />
+                    </div>
+                    <p className="text-sm text-amber-900 leading-relaxed">
+                      Focus on clearing your priority debts first. Your mortgage will continue in the background.
+                    </p>
+                  </div>
+                  {mortgageDebts.map(renderDebtCard)}
+                </>
+              )}
+            </>
+          );
+        })())}
       </div>
     </div>
   );
