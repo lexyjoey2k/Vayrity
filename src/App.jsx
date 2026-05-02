@@ -2450,6 +2450,11 @@ export default function App() {
 
   const nextQuickStep = () => {
     if (!canContinueQuickStep()) return;
+    if (quickStep >= QUICK_PLAN_TOTAL_STEPS - 1) {
+      setOnboardingMode('full');
+      setStep(5);
+      return;
+    }
     setQuickStep((current) => Math.min(current + 1, QUICK_PLAN_TOTAL_STEPS - 1));
   };
   const prevQuickStep = () => setQuickStep((current) => Math.max(current - 1, 0));
@@ -6298,7 +6303,9 @@ export default function App() {
                 disabled={!canContinueQuickStep()}
                 className="flex-[2] py-4 md:py-5 px-4 rounded-2xl font-black text-base md:text-lg transition-all shadow-xl flex items-center justify-center gap-3 uppercase tracking-wider min-w-0 bg-[#1B2B4B] text-white hover:bg-slate-800 active:scale-95"
               >
-                <span className="truncate">Continue</span>
+                <span className="truncate">
+                  {quickStep >= QUICK_PLAN_TOTAL_STEPS - 1 ? 'See Plan' : 'Continue'}
+                </span>
                 <ChevronRight className="w-6 h-6 shrink-0" />
               </button>
             </div>
