@@ -2944,30 +2944,42 @@ export default function App() {
         <p className="text-slate-500 text-sm">This is a starter plan based on the information you entered.</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <MetricCard
-          label={totals.remaining >= 0 ? 'Monthly money left' : 'Monthly shortfall'}
-          value={formatValue(Math.abs(totals.remaining))}
-          tone={totals.remaining >= 0 ? 'surplus' : 'deficit'}
-        />
-        <MetricCard
-          label="Recommended debt focus"
-          value={nextFocusDebt ? nextFocusDebt.name : 'No active debt'}
-        />
-        <MetricCard
-          label="Recommended monthly savings"
-          value={formatValue(monthlyPlan.savingsAllocation)}
-        />
-        <MetricCard
-          label="Your next best action"
-          value={
-            monthlyPlan.type === 'deficit'
-              ? 'Reduce monthly costs to remove your shortfall.'
-              : nextFocusDebt
-              ? `Send extra money to ${nextFocusDebt.name}.`
-              : 'Keep building savings consistently each month.'
-          }
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
+        {[
+          {
+            label: totals.remaining >= 0 ? 'Monthly money left' : 'Monthly shortfall',
+            value: formatValue(Math.abs(totals.remaining)),
+          },
+          {
+            label: 'Recommended debt focus',
+            value: nextFocusDebt ? nextFocusDebt.name : 'No active debt',
+          },
+          {
+            label: 'Recommended monthly savings',
+            value: formatValue(monthlyPlan.savingsAllocation),
+          },
+          {
+            label: 'Your next best action',
+            value:
+              monthlyPlan.type === 'deficit'
+                ? 'Reduce monthly costs to remove your shortfall.'
+                : nextFocusDebt
+                ? `Send extra money to ${nextFocusDebt.name}.`
+                : 'Keep building savings consistently each month.',
+          },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 shadow-sm min-w-0"
+          >
+            <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 break-words">
+              {item.label}
+            </p>
+            <p className="text-base md:text-lg font-bold text-slate-800 mt-2 break-words">
+              {item.value}
+            </p>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm space-y-4">
