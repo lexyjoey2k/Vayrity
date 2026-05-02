@@ -2913,6 +2913,39 @@ export default function App() {
     </div>
   );
 
+  const QuickPlanBillsView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-5">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Bills</h2>
+      <p className="text-slate-500">Add at least one fixed monthly bill.</p>
+      <button onClick={() => addBill()} className="px-4 py-3 rounded-2xl bg-cyan-50 text-[#1B2B4B] font-black text-xs uppercase tracking-wider border border-cyan-100">+ Add bill</button>
+      <div className="space-y-3">
+        {state.bills.map((bill) => (
+          <div key={bill.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+            <InputField label="Bill name" value={bill.name} onChange={(e) => updateBill(bill.id, 'name', e.target.value)} placeholder="Rent" />
+            <div className="flex gap-2">
+              <InputField label="Amount" type="number" value={bill.amount} onChange={(e) => updateBill(bill.id, 'amount', e.target.value)} placeholder="0" />
+              <button onClick={() => removeBill(bill.id)} className="h-12 mt-6 px-3 rounded-xl border border-slate-200 text-slate-500"><Trash2 className="w-4 h-4" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const QuickPlanFlexibleView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Flexible Spending</h2>
+      <p className="text-slate-500">Add your estimated monthly day-to-day spending total.</p>
+      <InputField
+        label="Flexible spending total"
+        type="number"
+        value={quickFlexibleCategory?.amount ?? ''}
+        onChange={(e) => setQuickFlexibleTotal(e.target.value)}
+        placeholder="0"
+      />
+    </div>
+  );
+
   const PrepView = () => (
     <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-16 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full">
       <h2 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-6 text-center">
