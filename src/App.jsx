@@ -1573,7 +1573,7 @@ const InputField = ({
 );
 
 export default function App() {
-  const QUICK_PLAN_TOTAL_STEPS = 4;
+  const QUICK_PLAN_TOTAL_STEPS = 5;
   const [step, setStep] = useState(0);
   const [onboardingMode, setOnboardingMode] = useState('quick');
   const [quickStep, setQuickStep] = useState(0);
@@ -2445,6 +2445,8 @@ export default function App() {
     if (quickStep === 1) return isFilled(state.income) && toNumber(state.income) > 0;
     if (quickStep === 2) return quickBillHasRequiredData;
     if (quickStep === 3) return quickFlexibleFilled && !isNegative(quickFlexibleCategory?.amount);
+    if (quickStep === 4)
+      return isFilled(state.savings?.emergencyTarget) && toNumber(state.savings?.emergencyTarget) > 0;
     return true;
   };
 
@@ -2777,6 +2779,136 @@ export default function App() {
         {state.incomeType === 'variable' && (
           <InputField label="Lowest monthly income (optional)" type="number" value={state.lowestIncome ?? ''} onChange={(e) => setState((prev) => ({ ...prev, lowestIncome: e.target.value }))} placeholder="0" />
         )}
+      </div>
+    </div>
+  );
+
+  const QuickPlanBillsView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-5">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Bills</h2>
+      <p className="text-slate-500">Add at least one fixed monthly bill.</p>
+      <button onClick={() => addBill()} className="px-4 py-3 rounded-2xl bg-cyan-50 text-[#1B2B4B] font-black text-xs uppercase tracking-wider border border-cyan-100">+ Add bill</button>
+      <div className="space-y-3">
+        {state.bills.map((bill) => (
+          <div key={bill.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+            <InputField label="Bill name" value={bill.name} onChange={(e) => updateBill(bill.id, 'name', e.target.value)} placeholder="Rent" />
+            <div className="flex gap-2">
+              <InputField label="Amount" type="number" value={bill.amount} onChange={(e) => updateBill(bill.id, 'amount', e.target.value)} placeholder="0" />
+              <button onClick={() => removeBill(bill.id)} className="h-12 mt-6 px-3 rounded-xl border border-slate-200 text-slate-500"><Trash2 className="w-4 h-4" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const QuickPlanFlexibleView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Flexible Spending</h2>
+      <p className="text-slate-500">Add your estimated monthly day-to-day spending total.</p>
+      <InputField
+        label="Flexible spending total"
+        type="number"
+        value={quickFlexibleCategory?.amount ?? ''}
+        onChange={(e) => setQuickFlexibleTotal(e.target.value)}
+        placeholder="0"
+      />
+    </div>
+  );
+
+  const QuickPlanSavingsView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6 min-w-0 overflow-hidden">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Savings</h2>
+      <p className="text-slate-500">
+        Your emergency buffer protects you from borrowing again.
+      </p>
+
+      <div className="grid gap-4 min-w-0">
+        <InputField
+          label="How much do you already have saved?"
+          type="number"
+          value={state.savings?.current ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: { ...(prev.savings || {}), current: e.target.value },
+            }))
+          }
+          placeholder="0"
+        />
+
+        <InputField
+          label="Emergency buffer target"
+          type="number"
+          value={state.savings?.emergencyTarget ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: { ...(prev.savings || {}), emergencyTarget: e.target.value },
+            }))
+          }
+          placeholder="500"
+        />
+
+        <div className="bg-cyan-50 border border-cyan-100 rounded-2xl p-4 min-w-0">
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Your personal goal can be a house purchase, car fund, holiday fund, wedding fund,
+            education fund, or other savings goal.
+          </p>
+        </div>
+
+        <label className="block min-w-0">
+          <span className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+            Personal savings goal (optional)
+          </span>
+          <select
+            value={state.savings?.goalType || 'emergency'}
+            onChange={(e) =>
+              setState((prev) => ({
+                ...prev,
+                savings: { ...(prev.savings || {}), goalType: e.target.value },
+              }))
+            }
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-[#1EB1BB] focus:ring-2 focus:ring-cyan-100"
+          >
+            <option value="emergency">Emergency only</option>
+            <option value="house">House purchase</option>
+            <option value="car">Car fund</option>
+            <option value="holiday">Holiday fund</option>
+            <option value="wedding">Wedding fund</option>
+            <option value="education">Education fund</option>
+            <option value="other">Other savings goal</option>
+          </select>
+        </label>
+
+        <InputField
+          label="Personal savings target amount (optional)"
+          type="number"
+          value={state.savings?.personalTargetAmount ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: { ...(prev.savings || {}), personalTargetAmount: e.target.value },
+            }))
+          }
+          placeholder="0"
+        />
+
+        <InputField
+          label="Timeframe in months (optional)"
+          type="number"
+          value={state.savings?.timeframeMonths ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: {
+                ...(prev.savings || {}),
+                timeframeMonths: e.target.value ? Number(e.target.value) : null,
+              },
+            }))
+          }
+          placeholder="12"
+        />
       </div>
     </div>
   );
@@ -6261,6 +6393,7 @@ export default function App() {
         {step === 0 && onboardingMode === 'quick' && quickStep === 1 && QuickPlanIncomeView()}
         {step === 0 && onboardingMode === 'quick' && quickStep === 2 && QuickPlanBillsView()}
         {step === 0 && onboardingMode === 'quick' && quickStep === 3 && QuickPlanFlexibleView()}
+        {step === 0 && onboardingMode === 'quick' && quickStep === 4 && QuickPlanSavingsView()}
         {step === 0 && onboardingMode === 'full' && WelcomeView()}
         {onboardingMode === 'full' && step === 1 && PrepView()}
         {onboardingMode === 'full' && step === 2 && BasicsView()}
@@ -6314,6 +6447,7 @@ export default function App() {
                 {quickStep === 1 && 'Add income to continue.'}
                 {quickStep === 2 && 'Add at least one bill with name and amount.'}
                 {quickStep === 3 && 'Add flexible spending total to continue.'}
+                {quickStep === 4 && 'Add an emergency buffer target to continue.'}
               </p>
             )}
           </div>
