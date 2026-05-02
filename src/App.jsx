@@ -1551,6 +1551,27 @@ const FormAccordionSection = ({ title, subtitle, isOpen, onToggle, children }) =
   </section>
 );
 
+const InputField = ({
+  label,
+  value,
+  onChange,
+  placeholder = '',
+  type = 'text',
+}) => (
+  <label className="block min-w-0">
+    <span className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+      {label}
+    </span>
+    <input
+      type={type}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-[#1EB1BB] focus:ring-2 focus:ring-cyan-100"
+    />
+  </label>
+);
+
 export default function App() {
   const QUICK_PLAN_TOTAL_STEPS = 4;
   const [step, setStep] = useState(0);
