@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   RotateCcw,
   Plus,
   Trash2,
@@ -14,6 +15,8 @@ import {
   PiggyBank,
   CalendarClock,
   Target,
+  Sparkles,
+  Check,
 } from 'lucide-react';
 
 // --- Constants ---
@@ -79,6 +82,29 @@ const INCOME_PERIODS = [
 ];
 
 const PAYOFF_TARGET_MONTHS = [6, 12, 24];
+
+// Maps goalType values to human-readable labels used in results copy.
+const SAVINGS_GOAL_LABELS = {
+  emergency: 'emergency fund',
+  house: 'house purchase',
+  car: 'car fund',
+  holiday: 'holiday fund',
+  wedding: 'wedding fund',
+  education: 'education fund',
+  other: 'savings goal',
+};
+
+// Returns a short label for the selected savings goal, falling back to a
+// generic "savings goal" when the goalType is missing or unrecognised.
+const getSavingsGoalLabel = (goalType) =>
+  SAVINGS_GOAL_LABELS[goalType] || 'savings goal';
+
+// Returns a title-cased version of the savings goal label for use in
+// section headings (e.g. "Build Your Emergency Fund").
+const getSavingsGoalHeading = (goalType) => {
+  const label = getSavingsGoalLabel(goalType);
+  return `Build Your ${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+};
 
 // --- Factories ---
 const createBudgetCategory = (name = '', type = 'essential') => ({
@@ -314,6 +340,10 @@ const normalizeLoadedState = (parsed) => {
   return {
     currency: parsed?.currency || 'GBP',
     income: parsed?.income ?? '',
+    // FEEDBACK #2: income type — 'regular' (steady monthly) or 'variable' (self-employed).
+    incomeType: parsed?.incomeType === 'variable' ? 'variable' : 'regular',
+    // FEEDBACK #2: optional lowest monthly income for variable earners (used for conservative estimate).
+    lowestIncome: parsed?.lowestIncome ?? '',
     budgetCategories: normalizedBudgetCategories,
     debts: normalizedDebts,
     bills: normalizedBills,
@@ -321,6 +351,13 @@ const normalizeLoadedState = (parsed) => {
       current: parsed?.savings?.current ?? '',
       emergencyTarget:
         parsed?.savings?.emergencyTarget ?? DEFAULT_EMERGENCY_FUND_FLOOR,
+      // FEEDBACK #3: what are you saving for? (emergency | house | car | holiday | wedding | education | other)
+      goalType: parsed?.savings?.goalType || 'emergency',
+      // FEEDBACK #3: optional timeframe in months. null = no deadline.
+      timeframeMonths:
+        parsed?.savings?.timeframeMonths === undefined
+          ? null
+          : parsed?.savings?.timeframeMonths,
     },
     tracking: {
       expenses: Array.isArray(parsed?.tracking?.expenses)
@@ -598,20 +635,31 @@ const calculatePortfolioPayoff = (
 const calculateSavingsDebtBlend = (state, totals) => {
   const currentSavings = toNumber(state.savings?.current);
   const userEmergencyTarget = toNumber(state.savings?.emergencyTarget);
-  const recommendedEmergencyTarget = getRecommendedEmergencyTarget(state);
+  // FEEDBACK #3: only apply emergency-fund floor / "recommended target" logic when
+  // the user is actually saving for an emergency fund. For house, car, holiday, etc.
+  // we just use the goal they entered and don't push it up.
+  const isEmergencyGoal =
+    !state.savings?.goalType || state.savings.goalType === 'emergency';
+  const recommendedEmergencyTarget = isEmergencyGoal
+    ? getRecommendedEmergencyTarget(state)
+    : 0;
 
-  const emergencyTarget = Math.max(
-    userEmergencyTarget || DEFAULT_EMERGENCY_FUND_FLOOR,
-    DEFAULT_EMERGENCY_FUND_FLOOR
-  );
+  const emergencyTarget = isEmergencyGoal
+    ? Math.max(
+        userEmergencyTarget || DEFAULT_EMERGENCY_FUND_FLOOR,
+        DEFAULT_EMERGENCY_FUND_FLOOR
+      )
+    : Math.max(0, userEmergencyTarget);
 
-  const effectiveEmergencyTarget = Math.max(
-    emergencyTarget,
-    Math.min(
-      recommendedEmergencyTarget,
-      emergencyTarget * 3 || recommendedEmergencyTarget
-    )
-  );
+  const effectiveEmergencyTarget = isEmergencyGoal
+    ? Math.max(
+        emergencyTarget,
+        Math.min(
+          recommendedEmergencyTarget,
+          emergencyTarget * 3 || recommendedEmergencyTarget
+        )
+      )
+    : emergencyTarget;
 
   const emergencyGap = Math.max(0, effectiveEmergencyTarget - currentSavings);
   const remaining = toNumber(totals.remaining);
@@ -635,6 +683,8 @@ const buildSavingsProjection = ({
   currentSavings = 0,
   savingsAllocation = 0,
   emergencyTarget = 0,
+  // FEEDBACK #3: optional deadline (in months). null = "no deadline".
+  timeframeMonths = null,
 }) => {
   const safeCurrent = Math.max(0, roundMoney(currentSavings));
   const safeTarget = Math.max(0, roundMoney(emergencyTarget));
@@ -648,6 +698,21 @@ const buildSavingsProjection = ({
       ? 0
       : monthlyContribution > 0
       ? Math.ceil(remainingToGoal / monthlyContribution)
+      : null;
+
+  // FEEDBACK #3: if a timeframe is set, compute what they'd need to save each month
+  // to actually hit the goal in time, and the gap vs. what the plan currently allocates.
+  const safeTimeframe =
+    typeof timeframeMonths === 'number' && timeframeMonths > 0
+      ? Math.round(timeframeMonths)
+      : null;
+  const requiredMonthlySavings =
+    safeTimeframe && remainingToGoal > 0
+      ? roundMoney(remainingToGoal / safeTimeframe)
+      : null;
+  const monthlyGap =
+    requiredMonthlySavings != null
+      ? roundMoney(requiredMonthlySavings - monthlyContribution)
       : null;
 
   const milestoneRatios = [0.25, 0.5, 0.75, 1];
@@ -672,12 +737,20 @@ const buildSavingsProjection = ({
 
   const nextMilestone = milestones.find((item) => !item.achieved) || milestones[milestones.length - 1] || null;
 
-  const status =
-    remainingToGoal <= 0
-      ? 'Goal funded'
-      : monthlyContribution > 0
-      ? `On track to reach your savings target ${getMonthsFromNowLabel(monthsToGoal)}`
-      : 'Add a monthly savings contribution to start reaching your target';
+  // FEEDBACK #3: status text now reflects whether they have a deadline and whether
+  // their current monthly savings is enough to hit it on time.
+  let status;
+  if (remainingToGoal <= 0) {
+    status = 'Goal funded';
+  } else if (safeTimeframe && monthlyGap != null && monthlyGap > 0) {
+    status = `Short by ${roundMoney(monthlyGap)} per month to hit your deadline`;
+  } else if (safeTimeframe && monthlyGap != null && monthlyGap <= 0) {
+    status = `On track to reach your goal within ${safeTimeframe} months`;
+  } else if (monthlyContribution > 0) {
+    status = `On track to reach your savings target ${getMonthsFromNowLabel(monthsToGoal)}`;
+  } else {
+    status = 'Add a monthly savings contribution to start reaching your target';
+  }
 
   return {
     monthlyContribution,
@@ -687,6 +760,10 @@ const buildSavingsProjection = ({
     milestones,
     nextMilestone,
     status,
+    // FEEDBACK #3: expose deadline-driven numbers so the UI can show them.
+    timeframeMonths: safeTimeframe,
+    requiredMonthlySavings,
+    monthlyGap,
   };
 };
 
@@ -730,6 +807,8 @@ const calculateMonthlyPlan = (
         currentSavings,
         savingsAllocation: 0,
         emergencyTarget: effectiveEmergencyTarget,
+        // FEEDBACK #3: pass user's deadline through.
+        timeframeMonths: state.savings?.timeframeMonths ?? null,
       }),
       actionHeadline: 'Fix the monthly gap first',
       explanation:
@@ -856,6 +935,8 @@ const calculateMonthlyPlan = (
     currentSavings,
     savingsAllocation,
     emergencyTarget: effectiveEmergencyTarget,
+    // FEEDBACK #3: pass user's deadline through.
+    timeframeMonths: state.savings?.timeframeMonths ?? null,
   });
 
   const firstPayoffMoment = debtTimeline?.payoffMoments?.[0] || null;
@@ -1244,6 +1325,7 @@ const PrintSummary = ({
   nextFocusDebt,
   formatValue,
   printPrimaryAction,
+  savingsGoalLabel,
 }) => (
   <div className="print-summary hidden">
     <div className="max-w-3xl mx-auto px-6 py-8">
@@ -1295,7 +1377,7 @@ const PrintSummary = ({
               value={formatValue(monthlyPlan.currentSavings)}
             />
             <PrintSummaryRow
-              label="Emergency target"
+              label="Savings target"
               value={formatValue(monthlyPlan.effectiveEmergencyTarget)}
             />
             <PrintSummaryRow
@@ -1369,7 +1451,7 @@ const PrintSummary = ({
                   }
                 />
                 <PrintSummaryRow
-                  label="Emergency fund estimate"
+                  label={`${savingsGoalLabel ? `${savingsGoalLabel.charAt(0).toUpperCase()}${savingsGoalLabel.slice(1)}` : 'Savings goal'} estimate`}
                   value={
                     monthlyPlan.emergencyFundMonths === 0
                       ? 'Already funded'
@@ -1446,6 +1528,29 @@ const PrintSummary = ({
   </div>
 );
 
+const FormAccordionSection = ({ title, subtitle, isOpen, onToggle, children }) => (
+  <section className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden min-w-0">
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full px-5 md:px-6 py-4 md:py-5 flex items-center justify-between gap-3 text-left"
+    >
+      <div className="min-w-0">
+        <h3 className="text-base md:text-lg font-black text-slate-800">{title}</h3>
+        {subtitle ? <p className="text-xs text-slate-500 mt-1">{subtitle}</p> : null}
+      </div>
+      <ChevronDown
+        className={`w-5 h-5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+      />
+    </button>
+    {isOpen && (
+      <div className="px-5 md:px-6 pb-5 md:pb-6 border-t border-slate-100 min-w-0">
+        {children}
+      </div>
+    )}
+  </section>
+);
+
 export default function App() {
   const [step, setStep] = useState(0);
   const [expandedDebtId, setExpandedDebtId] = useState(null);
@@ -1454,6 +1559,14 @@ export default function App() {
   const [expandedBudgetCategoryId, setExpandedBudgetCategoryId] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
+  const [openFormSections, setOpenFormSections] = useState({
+    income: true,
+    flexible: true,
+    debt: true,
+    bills: true,
+    savingsGoal: true,
+  });
   const [showTrimApplied, setShowTrimApplied] = useState(false);
   const [highlightTrimUpdate, setHighlightTrimUpdate] = useState(false);
   const [preTrimBudgetSnapshot, setPreTrimBudgetSnapshot] = useState(null);
@@ -1473,6 +1586,10 @@ export default function App() {
   const [state, setState] = useState({
     currency: 'GBP',
     income: '',
+    // FEEDBACK #2: income type — 'regular' or 'variable' (self-employed / variable income).
+    incomeType: 'regular',
+    // FEEDBACK #2: lowest monthly income (only used when incomeType === 'variable').
+    lowestIncome: '',
     budgetCategories: [
       createBudgetCategory('Groceries', 'essential'),
       createBudgetCategory('Transport', 'essential'),
@@ -1484,6 +1601,9 @@ export default function App() {
     savings: {
       current: '',
       emergencyTarget: DEFAULT_EMERGENCY_FUND_FLOOR,
+      // FEEDBACK #3: what they're saving for, and an optional deadline.
+      goalType: 'emergency',
+      timeframeMonths: null,
     },
     tracking: {
       expenses: [],
@@ -1680,6 +1800,46 @@ export default function App() {
 
   const incomeMissing = step === 2 && !isFilled(state.income);
   const budgetMissing = step === 2 && !hasBudgetCategoryAmount;
+  const hasDebtWithBalance = state.debts.some((debt) => toNumber(debt.balance) > 0);
+  const debtMissingPaymentDetails = state.debts.some(
+    (debt) =>
+      toNumber(debt.balance) > 0 &&
+      (!isFilled(debt.minPayment) || !isFilled(debt.interest) || !isFilled(debt.balance))
+  );
+  const savingsGoalMissing =
+    !isFilled(state.savings?.emergencyTarget) ||
+    toNumber(state.savings?.emergencyTarget) <= 0;
+
+  // Validation logic added
+  const calculationValidation = useMemo(() => {
+    const missing = [];
+    if (!isFilled(state.income) || toNumber(state.income) <= 0) {
+      missing.push('Monthly income');
+    }
+    if (savingsGoalMissing) {
+      missing.push('Savings goal');
+    }
+    if (hasDebtWithBalance && debtMissingPaymentDetails) {
+      missing.push('Debt payment details');
+    }
+
+    return {
+      isValid: missing.length === 0 && !hasInvalidDebts && !hasInvalidBills && !hasInvalidSavings,
+      missing,
+      message:
+        missing.length > 0
+          ? `You still need to complete: ${missing.join(', ')}`
+          : '',
+    };
+  }, [
+    state.income,
+    savingsGoalMissing,
+    hasDebtWithBalance,
+    debtMissingPaymentDetails,
+    hasInvalidDebts,
+    hasInvalidBills,
+    hasInvalidSavings,
+  ]);
 
   const getDebtStatus = (debt) => {
     const hasName = Boolean(debt.name && debt.name.trim());
@@ -1793,12 +1953,16 @@ export default function App() {
       };
     }
 
-    if (step === 4 && (hasInvalidDebts || hasInvalidBills)) {
+    if (step === 4 && !calculationValidation.isValid) {
       return {
         canProceed: false,
-        message: hasInvalidBills
-          ? 'Please fix invalid bill amounts before getting results.'
-          : 'Please fix invalid debt values before getting results.',
+        message:
+          calculationValidation.message ||
+          (hasInvalidBills
+            ? 'Please fix invalid bill amounts before getting results.'
+            : hasInvalidDebts
+            ? 'Please fix invalid debt values before getting results.'
+            : 'Please fix your details before getting results.'),
       };
     }
 
@@ -1814,11 +1978,37 @@ export default function App() {
     hasInvalidDebts,
     hasInvalidBills,
     hasInvalidSavings,
+    calculationValidation,
   ]);
+
+  // Accordion/collapsible logic added
+  const toggleFormSection = (key) => {
+    setOpenFormSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const totals = useMemo(() => {
     const periodMultiplier = INCOME_PERIODS.find((p) => p.key === incomePeriod)?.multiplier ?? 1;
-    const income = roundMoney(toNumber(state.income) * periodMultiplier);
+    const rawMonthlyIncome = toNumber(state.income) * periodMultiplier;
+
+    // INCOME LOGIC FIX: For self-employed/variable income, derive a conservative
+    // "safeIncome" to plan against — the lower of the user's stated lowest month
+    // OR 75% of their average. This ensures the plan works even on a slow month.
+    // For regular income, use the raw monthly figure directly.
+    let safeIncome;
+    if (state.incomeType === 'variable') {
+      const lowestIncome = toNumber(state.lowestIncome);
+      // safeIncome = lowestIncome ? Math.min(lowestIncome, averageIncome * 0.75) : averageIncome * 0.75
+      safeIncome = lowestIncome > 0
+        ? Math.min(lowestIncome, rawMonthlyIncome * 0.75)
+        : rawMonthlyIncome * 0.75;
+      safeIncome = roundMoney(Math.max(0, safeIncome));
+    } else {
+      // Regular income: use stated monthly income directly
+      safeIncome = roundMoney(rawMonthlyIncome);
+    }
+    // All downstream calculations use safeIncome (not raw income)
+    const income = safeIncome;
+
     const monthlyDebtRepayment = sumBy(state.debts, (debt) => debt.minPayment);
     const monthlyBills = sumBy(state.bills, (bill) => bill.amount);
     const budgetSpending = sumBy(state.budgetCategories, (category) => category.amount);
@@ -2032,6 +2222,10 @@ export default function App() {
     totals.priorityDebt ||
     null;
 
+  // Dynamic label for the user's selected savings goal type, used throughout
+  // the results screen so it reflects "holiday goal", "house goal", etc.
+  const savingsGoalLabel = getSavingsGoalLabel(state.savings?.goalType);
+
   const printPrimaryAction =
     monthlyPlan.type === 'deficit'
       ? trimPlan.quickWin
@@ -2204,9 +2398,14 @@ export default function App() {
       ],
       debts: [],
       bills: [],
+      // FEEDBACK #2 / #3: reset the new fields too so a fresh start is truly fresh.
+      incomeType: 'regular',
+      lowestIncome: '',
       savings: {
         current: '',
         emergencyTarget: DEFAULT_EMERGENCY_FUND_FLOOR,
+        goalType: 'emergency',
+        timeframeMonths: null,
       },
       tracking: {
         expenses: [],
@@ -2440,6 +2639,9 @@ export default function App() {
           src="/vayrity-logo.png"
           alt="Vayrity logo"
           className="h-16 md:h-20 object-contain mb-8 max-w-full"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
         />
 
         <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-[#1B2B4B] mb-3 break-words">
@@ -2452,12 +2654,11 @@ export default function App() {
       </div>
 
       <h2 className="text-3xl md:text-5xl font-extrabold mt-6 mb-8 text-slate-800 leading-tight max-w-2xl mx-auto">
-        See where your money is going and what to do next.
+        Build a simple plan for your money.
       </h2>
 
       <p className="text-slate-500 mb-12 text-lg md:text-xl leading-relaxed max-w-md mx-auto font-medium">
-        Debt and monthly bills can be overwhelming. We help you list everything
-        in one place and turn it into a more actionable plan.
+        Debt and monthly bills can be overwhelming. We help you list everything in one place and turn it into a more actionable plan.
       </p>
 
       <div className="flex justify-center mt-6">
@@ -2545,10 +2746,56 @@ export default function App() {
         </section>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <section className="min-w-0">
+          <FormAccordionSection
+            title="Income"
+            subtitle="Add your take-home pay."
+            isOpen={openFormSections.income ?? true}
+            onToggle={() => toggleFormSection('income')}
+          >
+          <section className="min-w-0 pt-4">
             <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">
               2. Take-Home Pay (After Tax)
             </label>
+
+            {/* FEEDBACK #2: Income Type — regular vs variable/self-employed. */}
+            <div className="mb-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                Income Type
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setState((prev) => ({ ...prev, incomeType: 'regular' }))
+                  }
+                  className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider border transition-all ${
+                    state.incomeType !== 'variable'
+                      ? 'bg-[#1B2B4B] text-white border-[#1B2B4B]'
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  Regular monthly
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setState((prev) => ({ ...prev, incomeType: 'variable' }))
+                  }
+                  className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider border transition-all ${
+                    state.incomeType === 'variable'
+                      ? 'bg-[#1B2B4B] text-white border-[#1B2B4B]'
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  Self-employed / variable
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                {state.incomeType === 'variable'
+                  ? 'Enter your average monthly income below. We use a safe estimate so your plan still works in low-income months.'
+                  : 'Pick "Self-employed / variable" if your income changes a lot from month to month.'}
+              </p>
+            </div>
 
             <div className="flex gap-2 flex-wrap mb-3">
               {INCOME_PERIODS.map((period) => (
@@ -2612,21 +2859,83 @@ export default function App() {
               </p>
             )}
 
-            {incomeMissing && (
-              <p className="text-xs text-red-500 font-bold mt-2">
-                Take-home pay is required.
+            {state.incomeType === 'variable' && (
+              <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                This is your <strong>average</strong> monthly take-home pay.
               </p>
             )}
-          </section>
 
-          <section className="bg-white rounded-[2rem] border border-slate-100 p-6 shadow-sm min-w-0 overflow-hidden">
+            {incomeMissing && (
+              <p className="text-xs text-red-500 font-bold mt-2">
+                Net income is required.
+              </p>
+            )}
+
+            {/* FEEDBACK #2: Optional "lowest monthly income" for variable earners. */}
+            {state.incomeType === 'variable' && (
+              <div className="mt-5">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                  Lowest Monthly Income (optional)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-lg text-slate-300">
+                    {getCurrencySymbol()}
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    value={state.lowestIncome ?? ''}
+                    onChange={(e) =>
+                      setState((prev) => ({ ...prev, lowestIncome: e.target.value }))
+                    }
+                    placeholder="0"
+                    className="w-full min-w-0 pl-12 pr-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-[#1EB1BB] focus:ring-4 focus:ring-cyan-50 focus:outline-none text-lg font-black transition-all"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                  We'll plan against the lower of your lowest month or about 75% of your average — so your plan still works on a slow month.
+                </p>
+                {(() => {
+                  const periodMultiplier =
+                    INCOME_PERIODS.find((p) => p.key === incomePeriod)?.multiplier ?? 1;
+                  const avg = toNumber(state.income) * periodMultiplier;
+                  const lowest = toNumber(state.lowestIncome);
+                  if (avg <= 0) return null;
+                  const conservativeFromAvg = avg * 0.75;
+                  const conservative =
+                    lowest > 0 ? Math.min(lowest, conservativeFromAvg) : conservativeFromAvg;
+                  return (
+                    <p className="text-xs text-[#1EB1BB] font-bold mt-2">
+                      Safe planning income: {getCurrencySymbol()}
+                      {Math.round(conservative).toLocaleString()} per month
+                    </p>
+                  );
+                })()}
+              </div>
+            )}
+          </section>
+          </FormAccordionSection>
+
+          <FormAccordionSection
+            title="Flexible Spending"
+            subtitle="Day-to-day costs that can change."
+            isOpen={openFormSections.flexible ?? true}
+            onToggle={() => toggleFormSection('flexible')}
+          >
+          <section className="min-w-0 overflow-hidden pt-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-start justify-between gap-4 mb-4">
               <div className="min-w-0">
                 <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
-                  3. Budget Categories
+                  3. Flexible Spending
                 </label>
-                <p className="text-xs text-slate-400">
-                  Add your usual monthly spending.
+                {/* FEEDBACK #1: clarify that this is for everyday spending, not fixed bills.
+                    Helper text plus an explicit nudge to add bills in the next step. */}
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Add your everyday spending (things that change from month to month).
+                </p>
+                <p className="text-[11px] text-[#1EB1BB] font-bold mt-1.5 leading-relaxed">
+                  You'll add fixed bills like rent and utilities under regular bills.
                 </p>
               </div>
 
@@ -2882,15 +3191,22 @@ export default function App() {
               </p>
             )}
           </section>
+          </FormAccordionSection>
         </div>
 
-        <section className="bg-white rounded-[2rem] border border-slate-100 p-6 md:p-8 shadow-sm overflow-hidden">
+        <FormAccordionSection
+          title="Savings Goal"
+          subtitle="Set your target and timeline."
+          isOpen={openFormSections.savingsGoal ?? true}
+          onToggle={() => toggleFormSection('savingsGoal')}
+        >
+        <section className="w-full overflow-hidden pt-4 min-w-0">
           <div className="flex items-start gap-4 mb-6">
             <div className="w-12 h-12 rounded-2xl bg-cyan-50 text-[#1EB1BB] flex items-center justify-center shrink-0">
               <PiggyBank className="w-6 h-6" />
             </div>
 
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h3 className="text-2xl font-black text-slate-800">Savings Setup</h3>
               <p className="text-sm text-slate-400 mt-1">
                 This helps Vayrity balance short-term safety with debt progress.
@@ -2898,15 +3214,44 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="min-w-0">
+          {/* FEEDBACK #3: "What are you saving for?" — short list of common goals. */}
+          <div className="mb-6 min-w-0 w-full overflow-hidden">
+            <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
+              What are you saving for?
+            </label>
+            <select
+              value={state.savings?.goalType || 'emergency'}
+              onChange={(e) =>
+                setState((prev) => ({
+                  ...prev,
+                  savings: { ...prev.savings, goalType: e.target.value },
+                }))
+              }
+              className="w-full min-w-0 max-w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-100 text-base font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
+            >
+              <option value="emergency">Emergency fund</option>
+              <option value="house">House / down payment</option>
+              <option value="car">Car</option>
+              <option value="holiday">Holiday or trip</option>
+              <option value="wedding">Wedding</option>
+              <option value="education">Education</option>
+              <option value="other">Something else</option>
+            </select>
+            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+              Pick what fits best. It helps us label your plan.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-full min-w-0">
+            <div className="w-full max-w-full min-w-0">
+              {/* FEEDBACK #3: clearer label, plain language. */}
               <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
-                Current Savings
+                Current savings
               </label>
 
-              <div className="relative">
+              <div className="relative w-full max-w-full min-w-0">
                 <span
-                  className={`absolute left-5 top-1/2 -translate-y-1/2 font-black text-xl ${
+                  className={`absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none font-black text-xl ${
                     savingsCurrentInvalid ? 'text-red-300' : 'text-slate-300'
                   }`}
                 >
@@ -2928,7 +3273,7 @@ export default function App() {
                     }))
                   }
                   placeholder="0"
-                  className={`w-full min-w-0 pl-14 pr-5 py-5 rounded-2xl text-xl font-black focus:outline-none ${
+                  className={`w-full max-w-full min-w-0 box-border pl-10 pr-4 py-5 rounded-2xl text-xl font-black focus:outline-none ${
                     savingsCurrentInvalid
                       ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
                       : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
@@ -2936,21 +3281,26 @@ export default function App() {
                 />
               </div>
 
-              {savingsCurrentInvalid && (
+              {savingsCurrentInvalid ? (
                 <p className="text-[10px] text-red-500 font-bold mt-2">
                   Current savings cannot be negative.
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                  The total amount you have in savings right now. Put 0 if you're starting from scratch.
                 </p>
               )}
             </div>
 
-            <div className="min-w-0">
+            <div className="w-full max-w-full min-w-0">
+              {/* FEEDBACK #3: clearer label, plus "total goal, not monthly savings" hint. */}
               <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
-                Savings Target
+                Savings goal
               </label>
 
-              <div className="relative">
+              <div className="relative w-full max-w-full min-w-0">
                 <span
-                  className={`absolute left-5 top-1/2 -translate-y-1/2 font-black text-xl ${
+                  className={`absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none font-black text-xl ${
                     savingsTargetInvalid ? 'text-red-300' : 'text-slate-300'
                   }`}
                 >
@@ -2972,7 +3322,7 @@ export default function App() {
                     }))
                   }
                   placeholder={String(DEFAULT_EMERGENCY_FUND_FLOOR)}
-                  className={`w-full min-w-0 pl-14 pr-5 py-5 rounded-2xl text-xl font-black focus:outline-none ${
+                  className={`w-full max-w-full min-w-0 box-border pl-10 pr-4 py-5 rounded-2xl text-xl font-black focus:outline-none ${
                     savingsTargetInvalid
                       ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
                       : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
@@ -2985,13 +3335,124 @@ export default function App() {
                   Savings target cannot be negative.
                 </p>
               ) : (
-                <p className="text-[10px] text-slate-400 mt-2">
-                  Recommended based on your essentials: {formatValue(recommendedEmergencyTarget)}
-                </p>
+                <>
+                  <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                    Enter your <strong>total goal / savings target</strong>, not how much you save each month.
+                  </p>
+                  {(state.savings?.goalType || 'emergency') === 'emergency' && (
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Recommended based on your essentials: {formatValue(recommendedEmergencyTarget)}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>
+
+          {/* FEEDBACK #3: optional timeframe — drives required-monthly-savings calc. */}
+          <div className="mt-6 min-w-0 w-full overflow-hidden">
+            <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
+              When do you want to reach this goal?
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full max-w-full overflow-hidden min-w-0">
+              {[
+                { label: '3 months', value: 3 },
+                { label: '6 months', value: 6 },
+                { label: '12 months', value: 12 },
+                { label: 'No deadline', value: null },
+              ].map((opt) => {
+                const current = state.savings?.timeframeMonths;
+                const isCustom =
+                  typeof current === 'number' &&
+                  ![3, 6, 12].includes(current);
+                const selected =
+                  opt.value === null
+                    ? current === null || current === undefined
+                    : current === opt.value;
+                return (
+                  <button
+                    key={String(opt.value)}
+                    type="button"
+                    onClick={() =>
+                      setState((prev) => ({
+                        ...prev,
+                        savings: { ...prev.savings, timeframeMonths: opt.value },
+                      }))
+                    }
+                    className={`w-full max-w-full min-w-0 box-border overflow-hidden rounded-2xl p-4 text-left border transition-all ${
+                      selected && !isCustom
+                        ? 'border-[#1EB1BB] ring-2 ring-[#1EB1BB]/20 bg-cyan-50'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="block w-full min-w-0 break-words whitespace-normal text-xs font-black uppercase tracking-wider">
+                      {opt.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 w-full max-w-full min-w-0">
+              <input
+                type="number"
+                min="1"
+                inputMode="numeric"
+                value={
+                  typeof state.savings?.timeframeMonths === 'number' &&
+                  ![3, 6, 12].includes(state.savings.timeframeMonths)
+                    ? state.savings.timeframeMonths
+                    : ''
+                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setState((prev) => ({
+                    ...prev,
+                    savings: {
+                      ...prev.savings,
+                      timeframeMonths: val === '' ? null : Math.max(1, Number(val)),
+                    },
+                  }));
+                }}
+                placeholder="Custom"
+                className="flex-1 w-full max-w-full min-w-0 box-border px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none text-center"
+              />
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 break-words">
+                months
+              </span>
+            </div>
+
+            {/* Live preview of what this means: required monthly savings. */}
+            {(() => {
+              const current = toNumber(state.savings?.current);
+              const target = toNumber(state.savings?.emergencyTarget);
+              const months = state.savings?.timeframeMonths;
+              const remainingToGoal = Math.max(0, target - current);
+              if (typeof months !== 'number' || months <= 0) {
+                return (
+                  <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                    No deadline? We’ll estimate how long it will take.
+                  </p>
+                );
+              }
+              if (remainingToGoal <= 0) {
+                return (
+                  <p className="text-[11px] text-emerald-600 font-bold mt-3 leading-relaxed">
+                    You've already reached this goal!
+                  </p>
+                );
+              }
+              const required = Math.ceil(remainingToGoal / months);
+              return (
+                <p className="text-[11px] text-[#1EB1BB] font-bold mt-3 leading-relaxed">
+                  To reach this in {months} months you'd need to save about{' '}
+                  {getCurrencySymbol()}{required.toLocaleString()} per month.
+                </p>
+              );
+            })()}
+          </div>
         </section>
+        </FormAccordionSection>
       </div>
     );
   };
@@ -3041,7 +3502,13 @@ export default function App() {
 
   const DebtsView = () => (
     <div className="space-y-8 max-w-4xl mx-auto animate-in w-full">
-      <div className="flex flex-col gap-6">
+      <FormAccordionSection
+        title="Debt"
+        subtitle="Add balances, APR, and minimum payments."
+        isOpen={openFormSections.debt ?? true}
+        onToggle={() => toggleFormSection('debt')}
+      >
+      <div className="flex flex-col gap-6 pt-4">
         <div className="flex flex-col sm:flex-row justify-between items-start gap-4 px-2">
           <div className="min-w-0">
             <h3 className="text-2xl font-black text-slate-800">Your Debts</h3>
@@ -3126,7 +3593,7 @@ export default function App() {
             </div>
 
             <p className="text-[11px] text-slate-400 mt-4">
-              Not sure? <span className="font-black text-slate-500">Avalanche</span> is the default — it typically saves more in interest. Switch to <span className="font-black text-slate-500">Snowball</span> if you need quick wins to stay on track.
+              Not sure? <span className="font-black text-slate-500">Avalanche</span> is the default. It typically saves more in interest. Switch to <span className="font-black text-slate-500">Snowball</span> if you need quick wins to stay on track.
             </p>
           </div>
         )}
@@ -3444,17 +3911,30 @@ export default function App() {
           );
         })())}
       </div>
+      </FormAccordionSection>
     </div>
   );
 
   const BillsView = () => (
     <div className="space-y-8 max-w-4xl mx-auto animate-in w-full">
-      <div className="flex flex-col gap-6">
+      <FormAccordionSection
+        title="Bills"
+        subtitle="Add your regular fixed monthly bills."
+        isOpen={openFormSections.bills ?? true}
+        onToggle={() => toggleFormSection('bills')}
+      >
+      <div className="flex flex-col gap-6 pt-4">
         <div className="flex flex-col sm:flex-row justify-between items-start gap-4 px-2">
           <div className="min-w-0">
             <h3 className="text-2xl font-black text-slate-800">Regular Bills</h3>
-            <p className="text-sm text-slate-400 mt-2">
-              You can add more than one of the same bill type if needed.
+            {/* FEEDBACK #1: explicit definition of what a "bill" is here, so people don't
+                double-enter groceries / eating out etc. */}
+            <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+              These are your <strong>fixed monthly bills</strong> like rent, utilities,
+              phone, or subscriptions. Usually the same amount every month.
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Day-to-day spending (groceries, transport, etc.) belongs to the flexible spending category.
             </p>
           </div>
 
@@ -3482,7 +3962,7 @@ export default function App() {
             </div>
             <h4 className="text-xl font-black text-slate-800 mb-2">No regular bills yet.</h4>
             <p className="text-sm text-slate-500 max-w-xs mx-auto leading-relaxed">
-              Add your fixed monthly bills — rent, utilities, subscriptions — so your plan includes everything leaving your account.
+              Add your fixed monthly bills: rent, utilities, subscriptions - so your plan includes everything leaving your account.
             </p>
           </div>
         ) : (
@@ -3606,6 +4086,7 @@ export default function App() {
           })
         )}
       </div>
+      </FormAccordionSection>
     </div>
   );
   const ResultsView = () => {
@@ -3627,16 +4108,36 @@ export default function App() {
 
     const savingsProgress = savingsProjection.progressPercent;
     const nextSavingsMilestone = savingsProjection.nextMilestone;
-    const savingsFeedback =
-      monthlyPlan.type === 'deficit'
-        ? 'Stabilise your monthly budget first, then restart steady savings automation.'
-        : savingsProjection.monthsToGoal === 0
-        ? 'You have already funded this savings goal. Keep contributing to stay resilient.'
-        : savingsProjection.monthsToGoal
-        ? `At ${formatValue(savingsProjection.monthlyContribution)}/month, you are on track to hit your target ${getMonthsFromNowLabel(
-            savingsProjection.monthsToGoal
-          )}.`
-        : 'Your target is set, but you need monthly surplus before the app can project a savings finish date.';
+    // SAVINGS RESULTS OUTPUT FIX:
+    // Two clear cases per the spec:
+    //   Case A (no deadline): "You'll reach your goal in 14 months"
+    //   Case B (deadline with gap): "You need £400/month. You're currently saving £250 → you need +£150 more"
+    //   Case C (deadline, on track): "You're on track to reach your goal within X months"
+    const savingsFeedback = (() => {
+      if (monthlyPlan.type === 'deficit') {
+        return 'Stabilise your monthly budget first, then restart steady savings automation.';
+      }
+      if (savingsProjection.monthsToGoal === 0) {
+        return 'You have already funded this savings goal. Keep contributing to stay resilient.';
+      }
+      // Deadline case
+      if (savingsProjection.timeframeMonths && savingsProjection.requiredMonthlySavings != null) {
+        const required = savingsProjection.requiredMonthlySavings;
+        const current = savingsProjection.monthlyContribution;
+        const gap = savingsProjection.monthlyGap;
+        if (gap != null && gap > 0) {
+          // Case B: gap exists — show the "need +£X more" format
+          return `You need ${formatValue(required)}/month to hit your goal in ${savingsProjection.timeframeMonths} months. You're currently saving ${formatValue(current)} → you need +${formatValue(gap)} more per month.`;
+        }
+        // Case C: on track with deadline
+        return `You're on track to reach your goal within ${savingsProjection.timeframeMonths} months.`;
+      }
+      // Case A: no deadline — show months to goal
+      if (savingsProjection.monthsToGoal) {
+        return `You'll reach your goal in ${formatMonthsLabel(savingsProjection.monthsToGoal)} (saving ${formatValue(savingsProjection.monthlyContribution)}/month).`;
+      }
+      return 'Your target is set, but you need monthly surplus before the app can project a savings finish date.';
+    })();
 
     const topBudgetCategories = [...state.budgetCategories]
       .filter((category) => toNumber(category.amount) > 0)
@@ -3715,6 +4216,26 @@ export default function App() {
       payoffStrategy === PAYOFF_STRATEGIES.avalanche
         ? 'Avalanche active'
         : 'Snowball active';
+    const debtBreakdownTarget =
+      (state.debts || []).find((debt) => toNumber(debt.balance) > 0 && toNumber(debt.minPayment) > 0) ||
+      null;
+    const firstPaymentEstimate = debtBreakdownTarget
+      ? (() => {
+          const balance = toNumber(debtBreakdownTarget.balance);
+          const monthlyRate = toNumber(debtBreakdownTarget.interest) / 100 / 12;
+          const interest = roundMoney(balance * monthlyRate);
+          const payment = toNumber(debtBreakdownTarget.minPayment);
+          const principalPaid = roundMoney(Math.max(0, payment - interest));
+          const remainingBalance = roundMoney(Math.max(0, balance - principalPaid));
+          return {
+            apr: toNumber(debtBreakdownTarget.interest),
+            monthlyRatePct: roundMoney(monthlyRate * 100),
+            interest,
+            principalPaid,
+            remainingBalance,
+          };
+        })()
+      : null;
 
     const heroTitle =
       monthlyPlan.type === 'deficit'
@@ -3755,7 +4276,7 @@ export default function App() {
                   : `Close the ${formatValue(Math.abs(monthlyPlan.surplus))} monthly gap first`
                 : nextFocusDebt
                   ? `Pay an extra ${formatValue(monthlyPlan.debtAllocation)}/month toward ${nextFocusDebt.name}`
-                  : `Move ${formatValue(monthlyPlan.savingsAllocation)}/month into your emergency fund`}
+                  : `Move ${formatValue(monthlyPlan.savingsAllocation)}/month towards your ${savingsGoalLabel}`}
             </p>
             <p className="text-sm text-slate-500 mt-1">
               {monthlyPlan.type === 'deficit'
@@ -3975,11 +4496,14 @@ export default function App() {
                       Savings target projection
                     </p>
                     <p className="text-2xl md:text-3xl font-black text-slate-800 break-words">
+                      {/* RESULTS OUTPUT FIX: Primary headline — "X months" (no deadline) or required amount (deadline) */}
                       {savingsProjection.monthsToGoal === 0
                         ? 'Goal already funded'
-                        : savingsProjection.monthsToGoal
-                        ? formatMonthsLabel(savingsProjection.monthsToGoal)
-                        : 'Waiting for surplus'}
+                        : savingsProjection.timeframeMonths && savingsProjection.requiredMonthlySavings != null
+                          ? `${formatValue(savingsProjection.requiredMonthlySavings)}/month needed`
+                          : savingsProjection.monthsToGoal
+                          ? `${formatMonthsLabel(savingsProjection.monthsToGoal)} to reach goal`
+                          : 'Waiting for surplus'}
                     </p>
                     <p className="text-sm text-slate-500 mt-2 break-words">
                       {savingsFeedback}
@@ -4009,6 +4533,41 @@ export default function App() {
                     <span>Target: {formatValue(monthlyPlan.effectiveEmergencyTarget)}</span>
                   </div>
                 </div>
+
+                {/* FEEDBACK #3: deadline-aware panel — required monthly savings + gap. */}
+                {savingsProjection.timeframeMonths ? (
+                  <div
+                    className={`mt-5 rounded-2xl border px-4 py-4 ${
+                      savingsProjection.monthlyGap != null && savingsProjection.monthlyGap > 0
+                        ? 'bg-amber-50 border-amber-100'
+                        : 'bg-emerald-50 border-emerald-100'
+                    }`}
+                  >
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-500 mb-1">
+                      Your deadline: {savingsProjection.timeframeMonths} months
+                    </p>
+                    <p className="text-sm font-bold text-slate-700 leading-relaxed">
+                      To hit your goal in time you'd need to save{' '}
+                      <span className="text-[#1B2B4B] font-black">
+                        {formatValue(savingsProjection.requiredMonthlySavings || 0)}
+                      </span>{' '}
+                      per month.
+                    </p>
+                    <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                      This plan sets aside{' '}
+                      <strong>{formatValue(savingsProjection.monthlyContribution)}</strong> per month.
+                      {savingsProjection.monthlyGap != null && savingsProjection.monthlyGap > 0 ? (
+                        <>
+                          {' '}You're short by{' '}
+                          <strong>{formatValue(savingsProjection.monthlyGap)}</strong> per month —
+                          consider trimming a flexible-spending category or extending your deadline.
+                        </>
+                      ) : (
+                        <> You're on track to reach your goal in time.</>
+                      )}
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -4062,15 +4621,24 @@ export default function App() {
                     ? 'Stabilise cash flow first'
                     : savingsProjection.monthsToGoal === 0
                     ? 'Goal complete'
+                    // RESULTS OUTPUT FIX: if deadline + gap, show "Need +£X/month"; if on track show months
+                    : savingsProjection.timeframeMonths && savingsProjection.monthlyGap != null && savingsProjection.monthlyGap > 0
+                    ? `Need +${formatValue(savingsProjection.monthlyGap)}/month`
+                    : savingsProjection.timeframeMonths && (savingsProjection.monthlyGap == null || savingsProjection.monthlyGap <= 0)
+                    ? 'On track for deadline'
                     : savingsProjection.monthsToGoal
-                    ? 'On track'
+                    ? `${formatMonthsLabel(savingsProjection.monthsToGoal)} away`
                     : 'Needs surplus'
                 }
-                description={savingsProjection.status}
+                description={savingsFeedback}
                 tone={
                   monthlyPlan.type === 'deficit'
                     ? 'warning'
-                    : savingsProjection.monthsToGoal === 0 || savingsProjection.monthsToGoal
+                    : savingsProjection.monthsToGoal === 0
+                    ? 'success'
+                    : savingsProjection.timeframeMonths && savingsProjection.monthlyGap != null && savingsProjection.monthlyGap > 0
+                    ? 'warning'
+                    : savingsProjection.monthsToGoal || (savingsProjection.timeframeMonths && savingsProjection.monthlyGap != null && savingsProjection.monthlyGap <= 0)
                     ? 'success'
                     : 'default'
                 }
@@ -4635,7 +5203,7 @@ export default function App() {
                   value={
                     hasActiveDebt
                       ? nextFocusDebt?.name || 'Priority debt'
-                      : 'Emergency savings'
+                      : `${savingsGoalLabel.charAt(0).toUpperCase()}${savingsGoalLabel.slice(1)}`
                   }
                   description={
                     hasActiveDebt
@@ -4814,6 +5382,39 @@ export default function App() {
                         )}
                       </div>
                     ))}
+
+                    {firstPaymentEstimate && (
+                      <div className="rounded-2xl border border-slate-100 bg-white p-4">
+                        <p className="text-sm font-black text-slate-700 mb-2">First payment estimate:</p>
+                        <p className="text-sm text-slate-600">
+                          Interest: {formatValue(firstPaymentEstimate.interest)}
+                        </p>
+                        <p className="text-sm text-slate-600">
+                          Principal paid: {formatValue(firstPaymentEstimate.principalPaid)}
+                        </p>
+                        <p className="text-sm text-slate-600">
+                          Remaining balance: {formatValue(firstPaymentEstimate.remainingBalance)}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Debt explanation logic added */}
+                    <details className="rounded-2xl border border-slate-100 bg-white p-4">
+                      <summary className="cursor-pointer text-sm font-black text-slate-700">
+                        How is this calculated?
+                      </summary>
+                      <div className="mt-3 text-sm text-slate-600 space-y-2">
+                        <p>
+                          APR is converted into estimated monthly interest. Payments cover interest first, then the remaining amount reduces your balance.
+                        </p>
+                        <p>APR: 39.9%</p>
+                        <p>Monthly interest rate: 3.325%</p>
+                        <p>£1,000 balance creates about £33.25 first-month interest.</p>
+                        <p className="text-xs text-slate-500">
+                          Results are estimates and may vary slightly from your lender&apos;s exact calculations.
+                        </p>
+                      </div>
+                    </details>
                   </div>
                 ) : (
                   <div className="bg-white rounded-2xl border border-slate-100 p-5">
@@ -4833,7 +5434,7 @@ export default function App() {
 
                   <div className="min-w-0">
                     <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                      Build Your Emergency Fund
+                      {getSavingsGoalHeading(state.savings?.goalType)}
                     </p>
                     <p className="text-sm text-slate-500">
                       A stronger buffer helps you avoid borrowing again.
@@ -4908,7 +5509,7 @@ export default function App() {
                   />
 
                   <InsightCard
-                    eyebrow="Emergency fund estimate"
+                    eyebrow={`${savingsGoalLabel.charAt(0).toUpperCase()}${savingsGoalLabel.slice(1)} estimate`}
                     value={
                       monthlyPlan.emergencyFundMonths === 0
                         ? 'Already funded'
@@ -5205,6 +5806,33 @@ export default function App() {
                     </div>
                   </div>
 
+                  {firstPaymentEstimate && (
+                    <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                      <p className="text-sm font-black text-slate-700 mb-2">First payment estimate:</p>
+                      <p className="text-sm text-slate-600">Interest: {formatValue(firstPaymentEstimate.interest)}</p>
+                      <p className="text-sm text-slate-600">Principal paid: {formatValue(firstPaymentEstimate.principalPaid)}</p>
+                      <p className="text-sm text-slate-600">Remaining balance: {formatValue(firstPaymentEstimate.remainingBalance)}</p>
+                    </div>
+                  )}
+
+                  {/* Debt explanation logic added */}
+                  <details className="mt-4 rounded-2xl border border-slate-100 bg-white p-4">
+                    <summary className="cursor-pointer text-sm font-black text-slate-700">
+                      How is this calculated?
+                    </summary>
+                    <div className="mt-3 text-sm text-slate-600 space-y-2">
+                      <p>
+                        APR is converted into estimated monthly interest. Payments cover interest first, then the remaining amount reduces your balance.
+                      </p>
+                      <p>APR: 39.9%</p>
+                      <p>Monthly interest rate: 3.325%</p>
+                      <p>£1,000 balance creates about £33.25 first-month interest.</p>
+                      <p className="text-xs text-slate-500">
+                        Results are estimates and may vary slightly from your lender&apos;s exact calculations.
+                      </p>
+                    </div>
+                  </details>
+
                   <div className="mt-6 bg-slate-50 rounded-2xl p-5 border border-slate-100 min-w-0">
                     <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
                       Current monthly payment
@@ -5396,10 +6024,16 @@ export default function App() {
 
         <DisclaimerCard />
 
-        <div className="text-center">
+        <div className="text-center flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6">
+          <button
+            onClick={() => setStep(4)}
+            className="text-slate-400 font-black text-[11px] uppercase tracking-[0.3em] hover:text-[#1EB1BB] transition-colors flex items-center gap-3 p-6 max-w-full"
+          >
+            <ChevronLeft className="w-4 h-4 shrink-0" /> Back
+          </button>
           <button
             onClick={() => setStep(2)}
-            className="text-slate-400 font-black text-[11px] uppercase tracking-[0.3em] hover:text-[#1EB1BB] transition-colors flex items-center gap-3 mx-auto p-6 max-w-full"
+            className="text-slate-400 font-black text-[11px] uppercase tracking-[0.3em] hover:text-[#1EB1BB] transition-colors flex items-center gap-3 p-6 max-w-full"
           >
             <PenLine className="w-4 h-4 shrink-0" /> Refine Your Figures
           </button>
@@ -5421,6 +6055,7 @@ export default function App() {
           nextFocusDebt={nextFocusDebt}
           formatValue={formatValue}
           printPrimaryAction={printPrimaryAction}
+          savingsGoalLabel={savingsGoalLabel}
         />
       )}
 
@@ -5506,7 +6141,15 @@ export default function App() {
               </button>
 
               <button
-                onClick={nextStep}
+                onClick={() => {
+                  if (!stepValidation.canProceed) return;
+                  if (step === 4) {
+                    // Review step added
+                    setShowGenerateConfirm(true);
+                  } else {
+                    nextStep();
+                  }
+                }}
                 disabled={!stepValidation.canProceed}
                 className={`flex-[2] py-4 md:py-5 px-4 rounded-2xl font-black text-base md:text-lg transition-all shadow-xl flex items-center justify-center gap-3 uppercase tracking-wider min-w-0 ${
                   stepValidation.canProceed
@@ -5515,9 +6158,68 @@ export default function App() {
                 }`}
               >
                 <span className="truncate">
-                  {step === 4 ? 'Get Results' : 'Continue'}
+                  {step === 4 ? 'Review Details' : 'Continue'}
                 </span>
                 <ChevronRight className="w-6 h-6 shrink-0" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGenerateConfirm && (
+        <div
+          className="no-print fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in"
+          onClick={() => setShowGenerateConfirm(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="generate-confirm-title"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-6 md:p-8 border border-slate-100"
+          >
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-cyan-50 text-[#1EB1BB] flex items-center justify-center shrink-0">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <h3
+                  id="generate-confirm-title"
+                  className="text-xl md:text-2xl font-black text-[#1B2B4B] leading-tight"
+                >
+                  Review your details
+                </h3>
+                <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+                  Check your core numbers before calculation.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-2.5 mb-6">
+              <p className="text-sm font-bold text-slate-700">Income: {formatValue(totals.income)}</p>
+              <p className="text-sm font-bold text-slate-700">Bills total: {formatValue(totals.monthlyBills)}</p>
+              <p className="text-sm font-bold text-slate-700">Flexible spending total: {formatValue(totals.nonEssentialBudgetTotal)}</p>
+              <p className="text-sm font-bold text-slate-700">Debt total: {formatValue(totals.totalDebtBalance)}</p>
+              <p className="text-sm font-bold text-slate-700">Savings goal: {formatValue(state.savings?.emergencyTarget)}</p>
+            </div>
+
+            <div className="flex flex-col-reverse sm:flex-row gap-3">
+              <button
+                onClick={() => setShowGenerateConfirm(false)}
+                className="flex-1 py-3.5 px-4 rounded-2xl font-black text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors text-xs uppercase tracking-widest"
+              >
+                Edit details
+              </button>
+              <button
+                onClick={() => {
+                  if (!calculationValidation.isValid) return;
+                  setShowGenerateConfirm(false);
+                  nextStep();
+                }}
+                className="flex-1 py-3.5 px-4 rounded-2xl font-black text-white bg-[#1B2B4B] hover:bg-slate-800 active:scale-95 transition-all text-xs uppercase tracking-widest shadow-xl"
+              >
+                Generate My Plan
               </button>
             </div>
           </div>
