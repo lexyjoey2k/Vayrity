@@ -1552,7 +1552,10 @@ const FormAccordionSection = ({ title, subtitle, isOpen, onToggle, children }) =
 );
 
 export default function App() {
+  const QUICK_PLAN_TOTAL_STEPS = 4;
   const [step, setStep] = useState(0);
+  const [onboardingMode, setOnboardingMode] = useState('quick');
+  const [quickStep, setQuickStep] = useState(0);
   const [expandedDebtId, setExpandedDebtId] = useState(null);
   const debtCardRefs = useRef({});
   const [expandedBillId, setExpandedBillId] = useState(null);
@@ -2382,6 +2385,9 @@ export default function App() {
   };
 
   const prevStep = () => setStep((current) => Math.max(current - 1, 0));
+  const nextQuickStep = () =>
+    setQuickStep((current) => Math.min(current + 1, QUICK_PLAN_TOTAL_STEPS - 1));
+  const prevQuickStep = () => setQuickStep((current) => Math.max(current - 1, 0));
 
   const resetApp = () => {
     localStorage.removeItem(STORAGE_KEY);
@@ -2661,15 +2667,41 @@ export default function App() {
         Debt and monthly bills can be overwhelming. We help you list everything in one place and turn it into a more actionable plan.
       </p>
 
-      <div className="flex justify-center mt-6">
+      <div className="flex flex-col items-center justify-center mt-6 gap-4">
         <button
-          onClick={nextStep}
+          onClick={() => {
+            setOnboardingMode('quick');
+            setQuickStep(1);
+          }}
           className="w-full max-w-sm mx-auto bg-[#1B2B4B] text-white py-6 px-6 rounded-2xl font-black text-xl hover:bg-slate-800 active:scale-95 transition-all shadow-xl flex items-center justify-center gap-4 group"
         >
-          Get started
+          Start Quick Plan
           <ChevronRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
         </button>
+        <button
+          onClick={() => {
+            setOnboardingMode('full');
+            setStep(1);
+          }}
+          className="text-slate-500 font-black text-xs uppercase tracking-[0.2em] hover:text-[#1EB1BB] transition-colors"
+        >
+          Use full setup instead
+        </button>
       </div>
+    </div>
+  );
+
+  const QuickPlanShellView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-16 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full">
+      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-4">
+        Quick Plan
+      </p>
+      <h2 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-4">
+        Quick Plan Step Placeholder
+      </h2>
+      <p className="text-slate-500 text-lg leading-relaxed">
+        Phase 1 foundation is active. Detailed Quick Plan steps will be added next.
+      </p>
     </div>
   );
 
@@ -6059,12 +6091,16 @@ export default function App() {
         />
       )}
 
-      {step > 0 && (
+      {(onboardingMode === 'full' ? step > 0 : step === 0) && (
         <header className="no-print p-4 md:p-8 flex justify-between items-center bg-white/80 backdrop-blur-xl sticky top-0 z-50 border-b border-slate-100">
           <div className="flex items-center justify-between w-full max-w-7xl mx-auto gap-4 min-w-0">
             <div
               className="flex items-center cursor-pointer active:scale-95 transition-transform min-w-0"
-              onClick={() => setStep(0)}
+              onClick={() => {
+                setStep(0);
+                setOnboardingMode('quick');
+                setQuickStep(0);
+              }}
             >
               <img
                 src="/vayrity-logo.png"
@@ -6083,7 +6119,7 @@ export default function App() {
         </header>
       )}
 
-      {step > 1 && step < 5 && (
+      {onboardingMode === 'full' && step > 1 && step < 5 && (
         <div className="no-print pt-8 px-4 sm:px-6 max-w-md mx-auto w-full">
           <div className="flex items-center justify-between min-w-0">
             {progressSteps.map((progressStep, index) => (
@@ -6112,15 +6148,57 @@ export default function App() {
       )}
 
       <main className="no-print flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 py-8 md:py-12 animate-in overflow-x-hidden">
-        {step === 0 && WelcomeView()}
-        {step === 1 && PrepView()}
-        {step === 2 && BasicsView()}
-        {step === 3 && DebtsView()}
-        {step === 4 && BillsView()}
-        {step === 5 && ResultsView()}
+        {step === 0 && onboardingMode === 'quick' && (quickStep === 0 ? WelcomeView() : QuickPlanShellView())}
+        {step === 0 && onboardingMode === 'full' && WelcomeView()}
+        {onboardingMode === 'full' && step === 1 && PrepView()}
+        {onboardingMode === 'full' && step === 2 && BasicsView()}
+        {onboardingMode === 'full' && step === 3 && DebtsView()}
+        {onboardingMode === 'full' && step === 4 && BillsView()}
+        {onboardingMode === 'full' && step === 5 && ResultsView()}
       </main>
 
-      {step > 1 && step < 5 && (
+      {onboardingMode === 'quick' && step === 0 && quickStep > 0 && (
+        <div className="no-print sticky bottom-0 bg-white/90 backdrop-blur-md p-4 sm:p-6 border-t border-slate-100 z-40">
+          <div className="w-full max-w-2xl mx-auto space-y-4">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 text-center">
+              Step {quickStep} of {QUICK_PLAN_TOTAL_STEPS - 1}
+            </p>
+            <div className="flex items-center gap-2">
+              {Array.from({ length: QUICK_PLAN_TOTAL_STEPS - 1 }).map((_, idx) => (
+                <div
+                  key={`quick-progress-${idx}`}
+                  className={`h-1.5 flex-1 rounded-full ${
+                    quickStep > idx ? 'bg-[#1EB1BB]' : 'bg-slate-200'
+                  }`}
+                />
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <button
+                onClick={() => {
+                  if (quickStep === 1) {
+                    setQuickStep(0);
+                  } else {
+                    prevQuickStep();
+                  }
+                }}
+                className="flex-1 flex items-center justify-center gap-2 py-4 md:py-5 px-4 rounded-2xl font-black text-slate-500 bg-slate-50 hover:bg-slate-100 transition-colors text-sm uppercase tracking-widest min-w-0"
+              >
+                <ChevronLeft className="w-5 h-5 shrink-0" /> Back
+              </button>
+              <button
+                onClick={nextQuickStep}
+                className="flex-[2] py-4 md:py-5 px-4 rounded-2xl font-black text-base md:text-lg transition-all shadow-xl flex items-center justify-center gap-3 uppercase tracking-wider min-w-0 bg-[#1B2B4B] text-white hover:bg-slate-800 active:scale-95"
+              >
+                <span className="truncate">Continue</span>
+                <ChevronRight className="w-6 h-6 shrink-0" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {onboardingMode === 'full' && step > 1 && step < 5 && (
         <div className="no-print sticky bottom-0 bg-white/90 backdrop-blur-md p-4 sm:p-6 border-t border-slate-100 z-40">
           <div className="w-full max-w-2xl mx-auto">
             {!stepValidation.canProceed && (
