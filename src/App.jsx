@@ -1551,6 +1551,27 @@ const FormAccordionSection = ({ title, subtitle, isOpen, onToggle, children }) =
   </section>
 );
 
+const InputField = ({
+  label,
+  value,
+  onChange,
+  placeholder = '',
+  type = 'text',
+}) => (
+  <label className="block min-w-0">
+    <span className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+      {label}
+    </span>
+    <input
+      type={type}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-[#1EB1BB] focus:ring-2 focus:ring-cyan-100"
+    />
+  </label>
+);
+
 export default function App() {
   const QUICK_PLAN_TOTAL_STEPS = 4;
   const [step, setStep] = useState(0);
@@ -2385,8 +2406,57 @@ export default function App() {
   };
 
   const prevStep = () => setStep((current) => Math.max(current - 1, 0));
-  const nextQuickStep = () =>
+  const quickBillHasRequiredData = state.bills.some(
+    (bill) => String(bill.name || '').trim() && isFilled(bill.amount) && !isNegative(bill.amount)
+  );
+  const quickFlexibleCategory = state.budgetCategories.find(
+    (category) => category.name === 'Flexible Spending'
+  );
+  const quickFlexibleFilled = isFilled(quickFlexibleCategory?.amount);
+
+  const setQuickFlexibleTotal = (value) => {
+    setState((prev) => {
+      const existing = prev.budgetCategories.find(
+        (category) => category.name === 'Flexible Spending'
+      );
+
+      if (existing) {
+        return {
+          ...prev,
+          budgetCategories: prev.budgetCategories.map((category) =>
+            category.id === existing.id ? { ...category, amount: value, type: 'non-essential' } : category
+          ),
+        };
+      }
+
+      return {
+        ...prev,
+        budgetCategories: [
+          createBudgetCategory('Flexible Spending', 'non-essential'),
+          ...prev.budgetCategories,
+        ].map((category, index) =>
+          index === 0 ? { ...category, amount: value } : category
+        ),
+      };
+    });
+  };
+
+  const canContinueQuickStep = () => {
+    if (quickStep === 1) return isFilled(state.income) && toNumber(state.income) > 0;
+    if (quickStep === 2) return quickBillHasRequiredData;
+    if (quickStep === 3) return quickFlexibleFilled && !isNegative(quickFlexibleCategory?.amount);
+    return true;
+  };
+
+  const nextQuickStep = () => {
+    if (!canContinueQuickStep()) return;
+    if (quickStep >= QUICK_PLAN_TOTAL_STEPS - 1) {
+      setOnboardingMode('full');
+      setStep(5);
+      return;
+    }
     setQuickStep((current) => Math.min(current + 1, QUICK_PLAN_TOTAL_STEPS - 1));
+  };
   const prevQuickStep = () => setQuickStep((current) => Math.max(current - 1, 0));
 
   const resetApp = () => {
@@ -2691,17 +2761,56 @@ export default function App() {
     </div>
   );
 
-  const QuickPlanShellView = () => (
-    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-16 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full">
-      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-4">
-        Quick Plan
-      </p>
-      <h2 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-4">
-        Quick Plan Step Placeholder
-      </h2>
-      <p className="text-slate-500 text-lg leading-relaxed">
-        Phase 1 foundation is active. Detailed Quick Plan steps will be added next.
-      </p>
+  const QuickPlanIncomeView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Income</h2>
+      <p className="text-slate-500">Add your monthly income to start your Quick Plan.</p>
+      <div className="grid gap-4">
+        <div>
+          <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Income type</label>
+          <div className="flex gap-2">
+            <button onClick={() => setState((prev) => ({ ...prev, incomeType: 'regular' }))} className={`px-4 py-2 rounded-xl border text-xs font-black uppercase ${state.incomeType === 'regular' ? 'bg-cyan-50 border-[#1EB1BB] text-[#1B2B4B]' : 'bg-white border-slate-200 text-slate-500'}`}>Regular</button>
+            <button onClick={() => setState((prev) => ({ ...prev, incomeType: 'variable' }))} className={`px-4 py-2 rounded-xl border text-xs font-black uppercase ${state.incomeType === 'variable' ? 'bg-cyan-50 border-[#1EB1BB] text-[#1B2B4B]' : 'bg-white border-slate-200 text-slate-500'}`}>Variable</button>
+          </div>
+        </div>
+        <InputField label="Income amount" type="number" value={state.income} onChange={(e) => setState((prev) => ({ ...prev, income: e.target.value }))} placeholder="0" />
+        {state.incomeType === 'variable' && (
+          <InputField label="Lowest monthly income (optional)" type="number" value={state.lowestIncome ?? ''} onChange={(e) => setState((prev) => ({ ...prev, lowestIncome: e.target.value }))} placeholder="0" />
+        )}
+      </div>
+    </div>
+  );
+
+  const QuickPlanBillsView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-5">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Bills</h2>
+      <p className="text-slate-500">Add at least one fixed monthly bill.</p>
+      <button onClick={() => addBill()} className="px-4 py-3 rounded-2xl bg-cyan-50 text-[#1B2B4B] font-black text-xs uppercase tracking-wider border border-cyan-100">+ Add bill</button>
+      <div className="space-y-3">
+        {state.bills.map((bill) => (
+          <div key={bill.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+            <InputField label="Bill name" value={bill.name} onChange={(e) => updateBill(bill.id, 'name', e.target.value)} placeholder="Rent" />
+            <div className="flex gap-2">
+              <InputField label="Amount" type="number" value={bill.amount} onChange={(e) => updateBill(bill.id, 'amount', e.target.value)} placeholder="0" />
+              <button onClick={() => removeBill(bill.id)} className="h-12 mt-6 px-3 rounded-xl border border-slate-200 text-slate-500"><Trash2 className="w-4 h-4" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const QuickPlanFlexibleView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Flexible Spending</h2>
+      <p className="text-slate-500">Add your estimated monthly day-to-day spending total.</p>
+      <InputField
+        label="Flexible spending total"
+        type="number"
+        value={quickFlexibleCategory?.amount ?? ''}
+        onChange={(e) => setQuickFlexibleTotal(e.target.value)}
+        placeholder="0"
+      />
     </div>
   );
 
@@ -6148,7 +6257,10 @@ export default function App() {
       )}
 
       <main className="no-print flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 py-8 md:py-12 animate-in overflow-x-hidden">
-        {step === 0 && onboardingMode === 'quick' && (quickStep === 0 ? WelcomeView() : QuickPlanShellView())}
+        {step === 0 && onboardingMode === 'quick' && quickStep === 0 && WelcomeView()}
+        {step === 0 && onboardingMode === 'quick' && quickStep === 1 && QuickPlanIncomeView()}
+        {step === 0 && onboardingMode === 'quick' && quickStep === 2 && QuickPlanBillsView()}
+        {step === 0 && onboardingMode === 'quick' && quickStep === 3 && QuickPlanFlexibleView()}
         {step === 0 && onboardingMode === 'full' && WelcomeView()}
         {onboardingMode === 'full' && step === 1 && PrepView()}
         {onboardingMode === 'full' && step === 2 && BasicsView()}
@@ -6188,12 +6300,22 @@ export default function App() {
               </button>
               <button
                 onClick={nextQuickStep}
+                disabled={!canContinueQuickStep()}
                 className="flex-[2] py-4 md:py-5 px-4 rounded-2xl font-black text-base md:text-lg transition-all shadow-xl flex items-center justify-center gap-3 uppercase tracking-wider min-w-0 bg-[#1B2B4B] text-white hover:bg-slate-800 active:scale-95"
               >
-                <span className="truncate">Continue</span>
+                <span className="truncate">
+                  {quickStep >= QUICK_PLAN_TOTAL_STEPS - 1 ? 'See Plan' : 'Continue'}
+                </span>
                 <ChevronRight className="w-6 h-6 shrink-0" />
               </button>
             </div>
+            {!canContinueQuickStep() && (
+              <p className="text-xs font-bold text-red-500 text-center">
+                {quickStep === 1 && 'Add income to continue.'}
+                {quickStep === 2 && 'Add at least one bill with name and amount.'}
+                {quickStep === 3 && 'Add flexible spending total to continue.'}
+              </p>
+            )}
           </div>
         </div>
       )}
