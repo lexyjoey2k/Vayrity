@@ -1573,7 +1573,7 @@ const InputField = ({
 );
 
 export default function App() {
-  const QUICK_PLAN_TOTAL_STEPS = 5;
+  const QUICK_PLAN_TOTAL_STEPS = 6;
   const [step, setStep] = useState(0);
   const [onboardingMode, setOnboardingMode] = useState('quick');
   const [quickStep, setQuickStep] = useState(0);
@@ -2452,11 +2452,6 @@ export default function App() {
 
   const nextQuickStep = () => {
     if (!canContinueQuickStep()) return;
-    if (quickStep >= QUICK_PLAN_TOTAL_STEPS - 1) {
-      setOnboardingMode('full');
-      setStep(5);
-      return;
-    }
     setQuickStep((current) => Math.min(current + 1, QUICK_PLAN_TOTAL_STEPS - 1));
   };
   const prevQuickStep = () => setQuickStep((current) => Math.max(current - 1, 0));
@@ -2758,6 +2753,261 @@ export default function App() {
           className="text-slate-500 font-black text-xs uppercase tracking-[0.2em] hover:text-[#1EB1BB] transition-colors"
         >
           Use full setup instead
+        </button>
+      </div>
+    </div>
+  );
+
+  const QuickPlanIncomeView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Income</h2>
+      <p className="text-slate-500">Add your monthly income to start your Quick Plan.</p>
+      <div className="grid gap-4">
+        <div>
+          <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Income type</label>
+          <div className="flex gap-2">
+            <button onClick={() => setState((prev) => ({ ...prev, incomeType: 'regular' }))} className={`px-4 py-2 rounded-xl border text-xs font-black uppercase ${state.incomeType === 'regular' ? 'bg-cyan-50 border-[#1EB1BB] text-[#1B2B4B]' : 'bg-white border-slate-200 text-slate-500'}`}>Regular</button>
+            <button onClick={() => setState((prev) => ({ ...prev, incomeType: 'variable' }))} className={`px-4 py-2 rounded-xl border text-xs font-black uppercase ${state.incomeType === 'variable' ? 'bg-cyan-50 border-[#1EB1BB] text-[#1B2B4B]' : 'bg-white border-slate-200 text-slate-500'}`}>Variable</button>
+          </div>
+        </div>
+        <InputField label="Income amount" type="number" value={state.income} onChange={(e) => setState((prev) => ({ ...prev, income: e.target.value }))} placeholder="0" />
+        {state.incomeType === 'variable' && (
+          <InputField label="Lowest monthly income (optional)" type="number" value={state.lowestIncome ?? ''} onChange={(e) => setState((prev) => ({ ...prev, lowestIncome: e.target.value }))} placeholder="0" />
+        )}
+      </div>
+    </div>
+  );
+
+  const QuickPlanBillsView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-5">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Bills</h2>
+      <p className="text-slate-500">Add at least one fixed monthly bill.</p>
+      <button onClick={() => addBill()} className="px-4 py-3 rounded-2xl bg-cyan-50 text-[#1B2B4B] font-black text-xs uppercase tracking-wider border border-cyan-100">+ Add bill</button>
+      <div className="space-y-3">
+        {state.bills.map((bill) => (
+          <div key={bill.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+            <InputField label="Bill name" value={bill.name} onChange={(e) => updateBill(bill.id, 'name', e.target.value)} placeholder="Rent" />
+            <div className="flex gap-2">
+              <InputField label="Amount" type="number" value={bill.amount} onChange={(e) => updateBill(bill.id, 'amount', e.target.value)} placeholder="0" />
+              <button onClick={() => removeBill(bill.id)} className="h-12 mt-6 px-3 rounded-xl border border-slate-200 text-slate-500"><Trash2 className="w-4 h-4" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const QuickPlanFlexibleView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Flexible Spending</h2>
+      <p className="text-slate-500">Add your estimated monthly day-to-day spending total.</p>
+      <InputField
+        label="Flexible spending total"
+        type="number"
+        value={quickFlexibleCategory?.amount ?? ''}
+        onChange={(e) => setQuickFlexibleTotal(e.target.value)}
+        placeholder="0"
+      />
+    </div>
+  );
+
+  const QuickPlanSavingsView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6 min-w-0 overflow-hidden">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Savings</h2>
+      <p className="text-slate-500">
+        Your emergency buffer protects you from borrowing again.
+      </p>
+
+      <div className="grid gap-4 min-w-0">
+        <InputField
+          label="How much do you already have saved?"
+          type="number"
+          value={state.savings?.current ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: { ...(prev.savings || {}), current: e.target.value },
+            }))
+          }
+          placeholder="0"
+        />
+
+        <InputField
+          label="Emergency buffer target"
+          type="number"
+          value={state.savings?.emergencyTarget ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: { ...(prev.savings || {}), emergencyTarget: e.target.value },
+            }))
+          }
+          placeholder="500"
+        />
+
+        <div className="bg-cyan-50 border border-cyan-100 rounded-2xl p-4 min-w-0">
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Your personal goal can be a house purchase, car fund, holiday fund, wedding fund,
+            education fund, or other savings goal.
+          </p>
+        </div>
+
+        <label className="block min-w-0">
+          <span className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+            Personal savings goal (optional)
+          </span>
+          <select
+            value={state.savings?.goalType || 'emergency'}
+            onChange={(e) =>
+              setState((prev) => ({
+                ...prev,
+                savings: { ...(prev.savings || {}), goalType: e.target.value },
+              }))
+            }
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-[#1EB1BB] focus:ring-2 focus:ring-cyan-100"
+          >
+            <option value="emergency">Emergency only</option>
+            <option value="house">House purchase</option>
+            <option value="car">Car fund</option>
+            <option value="holiday">Holiday fund</option>
+            <option value="wedding">Wedding fund</option>
+            <option value="education">Education fund</option>
+            <option value="other">Other savings goal</option>
+          </select>
+        </label>
+
+        <InputField
+          label="Personal savings target amount (optional)"
+          type="number"
+          value={state.savings?.personalTargetAmount ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: { ...(prev.savings || {}), personalTargetAmount: e.target.value },
+            }))
+          }
+          placeholder="0"
+        />
+
+        <InputField
+          label="Timeframe in months (optional)"
+          type="number"
+          value={state.savings?.timeframeMonths ?? ''}
+          onChange={(e) =>
+            setState((prev) => ({
+              ...prev,
+              savings: {
+                ...(prev.savings || {}),
+                timeframeMonths: e.target.value ? Number(e.target.value) : null,
+              },
+            }))
+          }
+          placeholder="12"
+        />
+      </div>
+    </div>
+  );
+
+  const quickConfidence = useMemo(() => {
+    let score = 0;
+    const debtAprCoverage =
+      state.debts.length === 0 ||
+      state.debts.every((debt) => !isFilled(debt.balance) || toNumber(debt.balance) <= 0 || toNumber(debt.interest) > 0);
+    if (debtAprCoverage) score += 1;
+
+    const detailedBills =
+      state.bills.length >= 2 && state.bills.every((bill) => String(bill.name || '').trim());
+    if (detailedBills) score += 1;
+
+    const flexibleCategorized =
+      state.budgetCategories.filter(
+        (category) =>
+          category.name !== 'Flexible Spending' &&
+          toNumber(category.amount) > 0 &&
+          category.type === 'non-essential'
+      ).length >= 2;
+    if (flexibleCategorized) score += 1;
+
+    const variableIncomeCovered =
+      state.incomeType !== 'variable' || toNumber(state.lowestIncome) > 0;
+    if (variableIncomeCovered) score += 1;
+
+    if (score <= 1) return 'Low';
+    if (score <= 3) return 'Medium';
+    return 'High';
+  }, [state]);
+
+  const QuickPlanResultsView = () => (
+    <div className="max-w-3xl mx-auto w-full space-y-6 min-w-0">
+      <div className="bg-white rounded-[2rem] p-6 md:p-8 border border-slate-100 shadow-sm">
+        <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-2">Your Quick Plan</h2>
+        <p className="text-slate-500 text-sm">This is a starter plan based on the information you entered.</p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
+        {[
+          {
+            label: totals.remaining >= 0 ? 'Monthly money left' : 'Monthly shortfall',
+            value: formatValue(Math.abs(totals.remaining)),
+          },
+          {
+            label: 'Recommended debt focus',
+            value: nextFocusDebt ? nextFocusDebt.name : 'No active debt',
+          },
+          {
+            label: 'Recommended monthly savings',
+            value: formatValue(monthlyPlan.savingsAllocation),
+          },
+          {
+            label: 'Your next best action',
+            value:
+              monthlyPlan.type === 'deficit'
+                ? 'Reduce monthly costs to remove your shortfall.'
+                : nextFocusDebt
+                ? `Send extra money to ${nextFocusDebt.name}.`
+                : 'Keep building savings consistently each month.',
+          },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className="bg-white rounded-2xl border border-slate-100 p-4 md:p-5 shadow-sm min-w-0"
+          >
+            <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 break-words">
+              {item.label}
+            </p>
+            <p className="text-base md:text-lg font-bold text-slate-800 mt-2 break-words">
+              {item.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-black text-slate-800">Plan confidence</h3>
+          <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-cyan-50 text-[#1B2B4B] border border-cyan-100">
+            {quickConfidence}
+          </span>
+        </div>
+        <p className="text-sm text-slate-500">Adding more detail improves accuracy.</p>
+      </div>
+
+      <div className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm space-y-3">
+        <h3 className="text-lg font-black text-slate-800">Improve accuracy</h3>
+        <ul className="text-sm text-slate-600 space-y-2 list-disc pl-5">
+          <li>Add debt APRs</li>
+          <li>Break flexible spending into categories</li>
+          <li>Add detailed bills</li>
+          <li>Add irregular-income months</li>
+        </ul>
+        <button
+          onClick={() => {
+            setOnboardingMode('full');
+            setStep(2);
+          }}
+          className="w-full sm:w-auto mt-2 bg-[#1B2B4B] text-white py-3 px-5 rounded-2xl font-black text-sm hover:bg-slate-800 transition-all"
+        >
+          Improve accuracy in full setup
         </button>
       </div>
     </div>
@@ -6394,6 +6644,7 @@ export default function App() {
         {step === 0 && onboardingMode === 'quick' && quickStep === 2 && QuickPlanBillsView()}
         {step === 0 && onboardingMode === 'quick' && quickStep === 3 && QuickPlanFlexibleView()}
         {step === 0 && onboardingMode === 'quick' && quickStep === 4 && QuickPlanSavingsView()}
+        {step === 0 && onboardingMode === 'quick' && quickStep === 5 && QuickPlanResultsView()}
         {step === 0 && onboardingMode === 'full' && WelcomeView()}
         {onboardingMode === 'full' && step === 1 && PrepView()}
         {onboardingMode === 'full' && step === 2 && BasicsView()}
@@ -6402,7 +6653,7 @@ export default function App() {
         {onboardingMode === 'full' && step === 5 && ResultsView()}
       </main>
 
-      {onboardingMode === 'quick' && step === 0 && quickStep > 0 && (
+      {onboardingMode === 'quick' && step === 0 && quickStep > 0 && quickStep < QUICK_PLAN_TOTAL_STEPS - 1 && (
         <div className="no-print sticky bottom-0 bg-white/90 backdrop-blur-md p-4 sm:p-6 border-t border-slate-100 z-40">
           <div className="w-full max-w-2xl mx-auto space-y-4">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 text-center">
