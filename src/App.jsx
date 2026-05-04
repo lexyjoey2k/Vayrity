@@ -18,6 +18,9 @@ import {
   Sparkles,
   Check,
 } from 'lucide-react';
+import ReactGA from 'react-ga4';
+
+ReactGA.initialize('G-KRQ0P3C3VF');
 
 // --- Constants ---
 const STORAGE_KEY = 'vayrity_app_data_v14';
@@ -1606,6 +1609,39 @@ export default function App() {
   const trimUpdatedRef = useRef(null);
   const debtPresetScrollRef = useRef(null);
   const billPresetScrollRef = useRef(null);
+
+  const lastTrackedAnalyticsPageRef = useRef('');
+
+  // Google Analytics page tracking added.
+  useEffect(() => {
+    const virtualPage =
+      onboardingMode === 'quick'
+        ? `/quick-plan/step-${quickStep + 1}`
+        : `/full-plan/step-${step}`;
+
+    if (lastTrackedAnalyticsPageRef.current === virtualPage) return;
+    lastTrackedAnalyticsPageRef.current = virtualPage;
+
+    ReactGA.send({
+      hitType: 'pageview',
+      page: virtualPage,
+      title: `Vayrity ${onboardingMode === 'quick' ? 'Quick Plan' : 'Full Plan'}`,
+    });
+
+    if (onboardingMode === 'quick' && quickStep === QUICK_PLAN_TOTAL_STEPS - 1) {
+      ReactGA.event({
+        category: 'Results',
+        action: 'Viewed Quick Plan Results',
+      });
+    }
+
+    if (onboardingMode === 'full' && step === 5) {
+      ReactGA.event({
+        category: 'Results',
+        action: 'Viewed Full Plan Results',
+      });
+    }
+  }, [onboardingMode, quickStep, step]);
 
   const [state, setState] = useState({
     currency: 'GBP',
