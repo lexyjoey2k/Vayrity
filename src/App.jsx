@@ -2496,9 +2496,12 @@ export default function App() {
     setExpandedBudgetCategoryId(null);
     setLastDeleted(null);
     setShowResetConfirm(false);
+    setShowGenerateConfirm(false);
     setShowTrimApplied(false);
     setHighlightTrimUpdate(false);
     setPreTrimBudgetSnapshot(null);
+    setOnboardingMode('quick');
+    setQuickStep(0);
     setStep(0);
   };
 
