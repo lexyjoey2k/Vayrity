@@ -3023,6 +3023,20 @@ export default function App() {
     </div>
   );
 
+  const QuickPlanFlexibleView = () => (
+    <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-12 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full space-y-6">
+      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-800">Flexible Spending</h2>
+      <p className="text-slate-500">Add your estimated monthly day-to-day spending total.</p>
+      <InputField
+        label="Flexible spending total"
+        type="number"
+        value={quickFlexibleCategory?.amount ?? ''}
+        onChange={(e) => setQuickFlexibleTotal(e.target.value)}
+        placeholder="0"
+      />
+    </div>
+  );
+
   const PrepView = () => (
     <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-8 md:p-16 shadow-2xl border border-slate-100 max-w-3xl mx-auto animate-in w-full">
       <h2 className="text-3xl md:text-4xl font-extrabold text-slate-800 mb-6 text-center">
