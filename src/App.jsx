@@ -3760,15 +3760,18 @@ export default function App() {
                 { label: 'Custom', value: 'custom' },
               ].map((opt) => {
                 const current = state.savings?.timeframeMonths;
-                const isCustom =
+                const isCustomValue =
                   typeof current === 'number' &&
                   ![3, 6, 12].includes(current);
+                const customSelected =
+                  state.savings?.timeframeChoice === 'custom' ||
+                  (state.savings?.timeframeChoice == null && isCustomValue);
                 const selected =
                   opt.value === 'custom'
-                    ? isCustom
+                    ? customSelected
                     : opt.value === null
-                    ? current === null || current === undefined
-                    : current === opt.value;
+                    ? !customSelected && (current === null || current === undefined)
+                    : !customSelected && current === opt.value;
                 return (
                   <button
                     key={String(opt.value)}
@@ -3781,14 +3784,22 @@ export default function App() {
                             : 1;
                         setState((prev) => ({
                           ...prev,
-                          savings: { ...prev.savings, timeframeMonths: customValue },
+                          savings: {
+                            ...prev.savings,
+                            timeframeChoice: 'custom',
+                            timeframeMonths: customValue,
+                          },
                         }));
                         return;
                       }
 
                       setState((prev) => ({
                         ...prev,
-                        savings: { ...prev.savings, timeframeMonths: opt.value },
+                        savings: {
+                          ...prev.savings,
+                          timeframeChoice: opt.value === null ? 'none' : 'preset',
+                          timeframeMonths: opt.value,
+                        },
                       }));
                     }}
                     className={`w-full h-full min-h-[72px] max-w-full min-w-0 box-border overflow-hidden rounded-2xl px-4 py-3 text-left border-2 transition-colors flex items-center ${
@@ -3805,8 +3816,7 @@ export default function App() {
               })}
             </div>
 
-            {typeof state.savings?.timeframeMonths === 'number' &&
-              ![3, 6, 12].includes(state.savings.timeframeMonths) && (
+            {state.savings?.timeframeChoice === 'custom' && (
                 <div className="mt-3 w-full max-w-full min-w-0">
                   <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
                     Number of months
