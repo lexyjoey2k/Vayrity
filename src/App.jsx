@@ -3757,27 +3757,42 @@ export default function App() {
                 { label: '6 months', value: 6 },
                 { label: '12 months', value: 12 },
                 { label: 'No deadline', value: null },
+                { label: 'Custom', value: 'custom' },
               ].map((opt) => {
                 const current = state.savings?.timeframeMonths;
                 const isCustom =
                   typeof current === 'number' &&
                   ![3, 6, 12].includes(current);
                 const selected =
-                  opt.value === null
+                  opt.value === 'custom'
+                    ? isCustom
+                    : opt.value === null
                     ? current === null || current === undefined
                     : current === opt.value;
                 return (
                   <button
                     key={String(opt.value)}
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      if (opt.value === 'custom') {
+                        const customValue =
+                          typeof current === 'number' && current > 0
+                            ? current
+                            : 1;
+                        setState((prev) => ({
+                          ...prev,
+                          savings: { ...prev.savings, timeframeMonths: customValue },
+                        }));
+                        return;
+                      }
+
                       setState((prev) => ({
                         ...prev,
                         savings: { ...prev.savings, timeframeMonths: opt.value },
-                      }))
-                    }
-                    className={`w-full max-w-full min-w-0 box-border overflow-hidden rounded-2xl p-4 text-left border transition-all ${
-                      selected && !isCustom
+                      }));
+                    }}
+                    className={`w-full h-full min-h-[72px] max-w-full min-w-0 box-border overflow-hidden rounded-2xl px-4 py-3 text-left border transition-all flex items-center ${
+                      selected
                         ? 'border-[#1EB1BB] ring-2 ring-[#1EB1BB]/20 bg-cyan-50'
                         : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
@@ -3790,34 +3805,31 @@ export default function App() {
               })}
             </div>
 
-            <div className="mt-3 flex items-center gap-2 w-full max-w-full min-w-0">
-              <input
-                type="number"
-                min="1"
-                inputMode="numeric"
-                value={
-                  typeof state.savings?.timeframeMonths === 'number' &&
-                  ![3, 6, 12].includes(state.savings.timeframeMonths)
-                    ? state.savings.timeframeMonths
-                    : ''
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setState((prev) => ({
-                    ...prev,
-                    savings: {
-                      ...prev.savings,
-                      timeframeMonths: val === '' ? null : Math.max(1, Number(val)),
-                    },
-                  }));
-                }}
-                placeholder="Custom"
-                className="flex-1 w-full max-w-full min-w-0 box-border px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none text-center"
-              />
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 break-words">
-                months
-              </span>
-            </div>
+            {typeof state.savings?.timeframeMonths === 'number' &&
+              ![3, 6, 12].includes(state.savings.timeframeMonths) && (
+                <div className="mt-3 w-full max-w-full min-w-0">
+                  <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                    Number of months
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    value={state.savings.timeframeMonths}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setState((prev) => ({
+                        ...prev,
+                        savings: {
+                          ...prev.savings,
+                          timeframeMonths: val === '' ? 1 : Math.max(1, Number(val)),
+                        },
+                      }));
+                    }}
+                    className="w-full max-w-full min-w-0 box-border px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
+                  />
+                </div>
+              )}
 
             {/* Live preview of what this means: required monthly savings. */}
             {(() => {
