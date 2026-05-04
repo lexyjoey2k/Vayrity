@@ -22,6 +22,15 @@ import ReactGA from 'react-ga4';
 
 ReactGA.initialize('G-KRQ0P3C3VF');
 
+// Google Analytics event tracking helper added.
+const trackEvent = (category, action, label) => {
+  ReactGA.event({
+    category,
+    action,
+    ...(label ? { label } : {}),
+  });
+};
+
 // --- Constants ---
 const STORAGE_KEY = 'vayrity_app_data_v14';
 const LEGACY_STORAGE_KEYS = ['vayrity_app_data_v13', 'vayrity_app_data_v12'];
@@ -1629,17 +1638,13 @@ export default function App() {
     });
 
     if (onboardingMode === 'quick' && quickStep === QUICK_PLAN_TOTAL_STEPS - 1) {
-      ReactGA.event({
-        category: 'Results',
-        action: 'Viewed Quick Plan Results',
-      });
+      trackEvent('Results', 'Viewed Quick Plan Results');
+      trackEvent('Results', 'Completed Quick Plan');
     }
 
     if (onboardingMode === 'full' && step === 5) {
-      ReactGA.event({
-        category: 'Results',
-        action: 'Viewed Full Plan Results',
-      });
+      trackEvent('Results', 'Viewed Full Plan Results');
+      trackEvent('Results', 'Completed Full Plan');
     }
   }, [onboardingMode, quickStep, step]);
 
@@ -2488,6 +2493,9 @@ export default function App() {
 
   const nextQuickStep = () => {
     if (!canContinueQuickStep()) return;
+
+    trackEvent('Onboarding', 'Quick Plan Step Completed', `Step ${quickStep}`);
+
     setQuickStep((current) => Math.min(current + 1, QUICK_PLAN_TOTAL_STEPS - 1));
   };
   const prevQuickStep = () => setQuickStep((current) => Math.max(current - 1, 0));
@@ -2776,6 +2784,7 @@ export default function App() {
       <div className="flex flex-col items-center justify-center mt-6 gap-4">
         <button
           onClick={() => {
+            trackEvent('Onboarding', 'Started Quick Plan');
             setOnboardingMode('quick');
             setQuickStep(1);
           }}
@@ -2786,6 +2795,7 @@ export default function App() {
         </button>
         <button
           onClick={() => {
+            trackEvent('Onboarding', 'Started Full Plan');
             setOnboardingMode('full');
             setStep(1);
           }}
@@ -3048,6 +3058,7 @@ export default function App() {
         </ul>
         <button
           onClick={() => {
+            trackEvent('Onboarding', 'Switched From Quick Plan To Full Setup');
             setOnboardingMode('full');
             setStep(2);
           }}
