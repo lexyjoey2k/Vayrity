@@ -3624,7 +3624,7 @@ export default function App() {
                   savings: { ...prev.savings, goalType: e.target.value },
                 }))
               }
-              className="w-full min-w-0 max-w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-100 text-base font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
+              className="w-full min-w-0 max-w-full box-border px-5 py-4 rounded-2xl bg-slate-50 border-2 border-slate-200 text-base font-black text-[#1B2B4B] hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20 focus:outline-none"
             >
               <option value="emergency">Emergency fund</option>
               <option value="house">House / down payment</option>
@@ -3672,8 +3672,8 @@ export default function App() {
                   placeholder="0"
                   className={`w-full max-w-full min-w-0 box-border pl-10 pr-4 py-5 rounded-2xl text-xl font-black focus:outline-none ${
                     savingsCurrentInvalid
-                      ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
-                      : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                      ? 'bg-red-50 border-2 border-red-300 text-red-600 focus:border-red-400 focus:ring-2 focus:ring-red-200'
+                      : 'bg-slate-50 border-2 border-slate-200 hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20'
                   }`}
                 />
               </div>
@@ -3721,8 +3721,8 @@ export default function App() {
                   placeholder={String(DEFAULT_EMERGENCY_FUND_FLOOR)}
                   className={`w-full max-w-full min-w-0 box-border pl-10 pr-4 py-5 rounded-2xl text-xl font-black focus:outline-none ${
                     savingsTargetInvalid
-                      ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
-                      : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                      ? 'bg-red-50 border-2 border-red-300 text-red-600 focus:border-red-400 focus:ring-2 focus:ring-red-200'
+                      : 'bg-slate-50 border-2 border-slate-200 hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20'
                   }`}
                 />
               </div>
@@ -3757,27 +3757,42 @@ export default function App() {
                 { label: '6 months', value: 6 },
                 { label: '12 months', value: 12 },
                 { label: 'No deadline', value: null },
+                { label: 'Custom', value: 'custom' },
               ].map((opt) => {
                 const current = state.savings?.timeframeMonths;
                 const isCustom =
                   typeof current === 'number' &&
                   ![3, 6, 12].includes(current);
                 const selected =
-                  opt.value === null
+                  opt.value === 'custom'
+                    ? isCustom
+                    : opt.value === null
                     ? current === null || current === undefined
                     : current === opt.value;
                 return (
                   <button
                     key={String(opt.value)}
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      if (opt.value === 'custom') {
+                        const customValue =
+                          typeof current === 'number' && current > 0
+                            ? current
+                            : 1;
+                        setState((prev) => ({
+                          ...prev,
+                          savings: { ...prev.savings, timeframeMonths: customValue },
+                        }));
+                        return;
+                      }
+
                       setState((prev) => ({
                         ...prev,
                         savings: { ...prev.savings, timeframeMonths: opt.value },
-                      }))
-                    }
-                    className={`w-full max-w-full min-w-0 box-border overflow-hidden rounded-2xl p-4 text-left border transition-all ${
-                      selected && !isCustom
+                      }));
+                    }}
+                    className={`w-full h-full min-h-[72px] max-w-full min-w-0 box-border overflow-hidden rounded-2xl px-4 py-3 text-left border-2 transition-colors flex items-center ${
+                      selected
                         ? 'border-[#1EB1BB] ring-2 ring-[#1EB1BB]/20 bg-cyan-50'
                         : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
@@ -3790,34 +3805,31 @@ export default function App() {
               })}
             </div>
 
-            <div className="mt-3 flex items-center gap-2 w-full max-w-full min-w-0">
-              <input
-                type="number"
-                min="1"
-                inputMode="numeric"
-                value={
-                  typeof state.savings?.timeframeMonths === 'number' &&
-                  ![3, 6, 12].includes(state.savings.timeframeMonths)
-                    ? state.savings.timeframeMonths
-                    : ''
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setState((prev) => ({
-                    ...prev,
-                    savings: {
-                      ...prev.savings,
-                      timeframeMonths: val === '' ? null : Math.max(1, Number(val)),
-                    },
-                  }));
-                }}
-                placeholder="Custom"
-                className="flex-1 w-full max-w-full min-w-0 box-border px-3 py-2.5 rounded-xl border border-slate-200 text-xs font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none text-center"
-              />
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 break-words">
-                months
-              </span>
-            </div>
+            {typeof state.savings?.timeframeMonths === 'number' &&
+              ![3, 6, 12].includes(state.savings.timeframeMonths) && (
+                <div className="mt-3 w-full max-w-full min-w-0">
+                  <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
+                    Number of months
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    value={state.savings.timeframeMonths}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setState((prev) => ({
+                        ...prev,
+                        savings: {
+                          ...prev.savings,
+                          timeframeMonths: val === '' ? 1 : Math.max(1, Number(val)),
+                        },
+                      }));
+                    }}
+                    className="w-full max-w-full min-w-0 box-border px-4 py-3 rounded-2xl border-2 border-slate-200 bg-white text-sm font-black text-[#1B2B4B] hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20 focus:outline-none"
+                  />
+                </div>
+              )}
 
             {/* Live preview of what this means: required monthly savings. */}
             {(() => {
