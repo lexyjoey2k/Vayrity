@@ -3624,7 +3624,7 @@ export default function App() {
                   savings: { ...prev.savings, goalType: e.target.value },
                 }))
               }
-              className="w-full min-w-0 max-w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-100 text-base font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
+              className="w-full min-w-0 max-w-full box-border px-5 py-4 rounded-2xl bg-slate-50 border-2 border-slate-200 text-base font-black text-[#1B2B4B] hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20 focus:outline-none"
             >
               <option value="emergency">Emergency fund</option>
               <option value="house">House / down payment</option>
@@ -3672,8 +3672,8 @@ export default function App() {
                   placeholder="0"
                   className={`w-full max-w-full min-w-0 box-border pl-10 pr-4 py-5 rounded-2xl text-xl font-black focus:outline-none ${
                     savingsCurrentInvalid
-                      ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
-                      : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                      ? 'bg-red-50 border-2 border-red-300 text-red-600 focus:border-red-400 focus:ring-2 focus:ring-red-200'
+                      : 'bg-slate-50 border-2 border-slate-200 hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20'
                   }`}
                 />
               </div>
@@ -3721,8 +3721,8 @@ export default function App() {
                   placeholder={String(DEFAULT_EMERGENCY_FUND_FLOOR)}
                   className={`w-full max-w-full min-w-0 box-border pl-10 pr-4 py-5 rounded-2xl text-xl font-black focus:outline-none ${
                     savingsTargetInvalid
-                      ? 'bg-red-50 border border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
-                      : 'bg-slate-50 focus:ring-2 focus:ring-[#1EB1BB]'
+                      ? 'bg-red-50 border-2 border-red-300 text-red-600 focus:border-red-400 focus:ring-2 focus:ring-red-200'
+                      : 'bg-slate-50 border-2 border-slate-200 hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20'
                   }`}
                 />
               </div>
@@ -3791,7 +3791,7 @@ export default function App() {
                         savings: { ...prev.savings, timeframeMonths: opt.value },
                       }));
                     }}
-                    className={`w-full h-full min-h-[72px] max-w-full min-w-0 box-border overflow-hidden rounded-2xl px-4 py-3 text-left border transition-all flex items-center ${
+                    className={`w-full h-full min-h-[72px] max-w-full min-w-0 box-border overflow-hidden rounded-2xl px-4 py-3 text-left border-2 transition-colors flex items-center ${
                       selected
                         ? 'border-[#1EB1BB] ring-2 ring-[#1EB1BB]/20 bg-cyan-50'
                         : 'border-slate-200 bg-white hover:border-slate-300'
@@ -3826,7 +3826,7 @@ export default function App() {
                         },
                       }));
                     }}
-                    className="w-full max-w-full min-w-0 box-border px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-black text-[#1B2B4B] focus:ring-2 focus:ring-[#1EB1BB] focus:outline-none"
+                    className="w-full max-w-full min-w-0 box-border px-4 py-3 rounded-2xl border-2 border-slate-200 bg-white text-sm font-black text-[#1B2B4B] hover:border-slate-300 focus:border-[#1EB1BB] focus:bg-cyan-50/40 focus:ring-2 focus:ring-[#1EB1BB]/20 focus:outline-none"
                   />
                 </div>
               )}
